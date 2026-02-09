@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { routes } from "./routes";
 import { fetchConfig } from "./api/config";
 import { useSettingsStore } from "./store/settingsStore";
+import { useActiveCluster } from "./hooks/useActiveCluster";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,8 +19,9 @@ const router = createBrowserRouter(routes);
 
 function EditionDetector() {
   const setEdition = useSettingsStore((s) => s.setEdition);
+  const activeCluster = useActiveCluster();
   const { data } = useQuery({
-    queryKey: ["config"],
+    queryKey: ["config", activeCluster],
     queryFn: fetchConfig,
     staleTime: Infinity,
   });

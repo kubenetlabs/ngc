@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
 	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
 	"github.com/kubenetlabs/ngc/api/internal/server"
 	"github.com/kubenetlabs/ngc/api/pkg/version"
@@ -14,6 +15,7 @@ import (
 func main() {
 	port := flag.Int("port", 8080, "HTTP server listen port")
 	kubeconfig := flag.String("kubeconfig", "", "Path to kubeconfig file (optional, defaults to in-cluster or ~/.kube/config)")
+	clustersConfig := flag.String("clusters-config", "", "Path to clusters YAML config (enables multi-cluster)")
 	dbType := flag.String("db-type", "clickhouse", "Database backend type (clickhouse)")
 	clickhouseURL := flag.String("clickhouse-url", "localhost:9000", "ClickHouse connection URL")
 	showVersion := flag.Bool("version", false, "Print version and exit")
@@ -36,14 +38,31 @@ func main() {
 		"version", version.Version,
 	)
 
-	k8sClient, err := kubernetes.New(*kubeconfig)
-	if err != nil {
-		slog.Error("failed to create kubernetes client", "error", err)
-		os.Exit(1)
+	var mgr *cluster.Manager
+	if *clustersConfig != "" {
+		cfg, err := cluster.LoadConfig(*clustersConfig)
+		if err != nil {
+			slog.Error("failed to load clusters config", "error", err)
+			os.Exit(1)
+		}
+		mgr, err = cluster.New(cfg)
+		if err != nil {
+			slog.Error("failed to create cluster manager", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("multi-cluster mode enabled", "clusters", mgr.Names())
+	} else {
+		k8sClient, err := kubernetes.New(*kubeconfig)
+		if err != nil {
+			slog.Error("failed to create kubernetes client", "error", err)
+			os.Exit(1)
+		}
+		mgr = cluster.NewSingleCluster(k8sClient)
+		slog.Info("single-cluster mode")
 	}
 
 	srv := server.New(server.Config{
-		KubeClient: k8sClient,
+		ClusterManager: mgr,
 	})
 
 	addr := fmt.Sprintf(":%d", *port)

@@ -6,18 +6,22 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
 )
 
 // GatewayHandler handles Gateway and GatewayClass API requests.
-type GatewayHandler struct {
-	KubeClient *kubernetes.Client
-}
+type GatewayHandler struct{}
 
 // List returns all gateways, optionally filtered by ?namespace= query param.
 func (h *GatewayHandler) List(w http.ResponseWriter, r *http.Request) {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
 	ns := r.URL.Query().Get("namespace")
-	gateways, err := h.KubeClient.ListGateways(r.Context(), ns)
+	gateways, err := k8s.ListGateways(r.Context(), ns)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -32,10 +36,16 @@ func (h *GatewayHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Get returns a single gateway by namespace and name.
 func (h *GatewayHandler) Get(w http.ResponseWriter, r *http.Request) {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
 	ns := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
 
-	gw, err := h.KubeClient.GetGateway(r.Context(), ns, name)
+	gw, err := k8s.GetGateway(r.Context(), ns, name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -45,7 +55,13 @@ func (h *GatewayHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // ListClasses returns all GatewayClasses.
 func (h *GatewayHandler) ListClasses(w http.ResponseWriter, r *http.Request) {
-	classes, err := h.KubeClient.ListGatewayClasses(r.Context())
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	classes, err := k8s.ListGatewayClasses(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -60,9 +76,15 @@ func (h *GatewayHandler) ListClasses(w http.ResponseWriter, r *http.Request) {
 
 // GetClass returns a single GatewayClass by name.
 func (h *GatewayHandler) GetClass(w http.ResponseWriter, r *http.Request) {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
 	name := chi.URLParam(r, "name")
 
-	gc, err := h.KubeClient.GetGatewayClass(r.Context(), name)
+	gc, err := k8s.GetGatewayClass(r.Context(), name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return

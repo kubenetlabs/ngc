@@ -62,13 +62,17 @@ func TestRouteHandler_List(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(route1, route2).Build()
 	k8sClient := kubernetes.NewForTest(fakeClient)
-	handler := &RouteHandler{KubeClient: k8sClient}
+	handler := &RouteHandler{}
 
 	t.Run("list all routes", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Get("/api/v1/httproutes", handler.List)
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/httproutes", nil)
 		w := httptest.NewRecorder()
 
-		handler.List(w, req)
+		r.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("expected status 200, got %d", w.Code)
@@ -85,10 +89,14 @@ func TestRouteHandler_List(t *testing.T) {
 	})
 
 	t.Run("list routes with namespace filter", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Get("/api/v1/httproutes", handler.List)
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/httproutes?namespace=ns1", nil)
 		w := httptest.NewRecorder()
 
-		handler.List(w, req)
+		r.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("expected status 200, got %d", w.Code)
@@ -139,10 +147,11 @@ func TestRouteHandler_Get(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(route).Build()
 	k8sClient := kubernetes.NewForTest(fakeClient)
-	handler := &RouteHandler{KubeClient: k8sClient}
+	handler := &RouteHandler{}
 
 	t.Run("successful get", func(t *testing.T) {
 		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
 		r.Get("/{namespace}/{name}", handler.Get)
 
 		req := httptest.NewRequest(http.MethodGet, "/test-ns/test-route", nil)
@@ -175,6 +184,7 @@ func TestRouteHandler_Get(t *testing.T) {
 
 	t.Run("route not found", func(t *testing.T) {
 		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
 		r.Get("/{namespace}/{name}", handler.Get)
 
 		req := httptest.NewRequest(http.MethodGet, "/bad-ns/bad-name", nil)

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { useActiveCluster } from "./useActiveCluster";
 
 interface UseWebSocketOptions {
   url: string;
@@ -11,13 +12,16 @@ export function useWebSocket({ url, onMessage, reconnectInterval = 3000, enabled
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [connected, setConnected] = useState(false);
+  const activeCluster = useActiveCluster();
 
   useEffect(() => {
     if (!enabled) return;
 
     function connect() {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}${url}`;
+      const separator = url.includes("?") ? "&" : "?";
+      const clusterParam = activeCluster ? `${separator}cluster=${activeCluster}` : "";
+      const wsUrl = `${protocol}//${window.location.host}${url}${clusterParam}`;
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => setConnected(true);
@@ -43,7 +47,7 @@ export function useWebSocket({ url, onMessage, reconnectInterval = 3000, enabled
       clearTimeout(reconnectTimerRef.current);
       wsRef.current?.close();
     };
-  }, [url, onMessage, reconnectInterval, enabled]);
+  }, [url, onMessage, reconnectInterval, enabled, activeCluster]);
 
   const send = useCallback((data: unknown) => {
     wsRef.current?.send(JSON.stringify(data));

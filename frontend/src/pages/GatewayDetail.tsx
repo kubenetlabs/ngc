@@ -3,18 +3,20 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchGateway } from "@/api/gateways";
 import { fetchHTTPRoutes } from "@/api/routes";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { useActiveCluster } from "@/hooks/useActiveCluster";
 
 export default function GatewayDetail() {
   const { ns, name } = useParams<{ ns: string; name: string }>();
+  const activeCluster = useActiveCluster();
 
   const { data: gw, isLoading, error } = useQuery({
-    queryKey: ["gateway", ns, name],
+    queryKey: ["gateway", activeCluster, ns, name],
     queryFn: () => fetchGateway(ns!, name!),
     enabled: !!ns && !!name,
   });
 
   const { data: allRoutes } = useQuery({
-    queryKey: ["httproutes"],
+    queryKey: ["httproutes", activeCluster],
     queryFn: () => fetchHTTPRoutes(),
   });
 

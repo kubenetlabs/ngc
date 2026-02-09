@@ -1,5 +1,6 @@
 import { Moon, Sun } from "lucide-react";
 import { useSettingsStore } from "@/store/settingsStore";
+import { ClusterSelector } from "./ClusterSelector";
 
 export function Header() {
   const { theme, toggleTheme, edition } = useSettingsStore();
@@ -10,6 +11,7 @@ export function Header() {
         <h2 className="text-sm font-medium text-muted-foreground">
           NGINX Gateway Fabric
         </h2>
+        <ClusterSelector />
         <span
           className={`rounded-full px-2 py-0.5 text-xs font-medium ${
             edition === "enterprise"

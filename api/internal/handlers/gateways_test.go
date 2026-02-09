@@ -13,6 +13,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
 	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
 )
 
@@ -25,6 +26,16 @@ func setupScheme(t *testing.T) *runtime.Scheme {
 		t.Fatalf("failed to add gateway-api scheme: %v", err)
 	}
 	return scheme
+}
+
+// contextMiddleware injects a kubernetes client into the request context for testing.
+func contextMiddleware(k8s *kubernetes.Client) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := cluster.WithClient(r.Context(), k8s)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
 func TestGatewayHandler_List(t *testing.T) {
@@ -65,13 +76,17 @@ func TestGatewayHandler_List(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gw1, gw2).Build()
 	k8sClient := kubernetes.NewForTest(fakeClient)
-	handler := &GatewayHandler{KubeClient: k8sClient}
+	handler := &GatewayHandler{}
 
 	t.Run("list all gateways", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Get("/api/v1/gateways", handler.List)
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/gateways", nil)
 		w := httptest.NewRecorder()
 
-		handler.List(w, req)
+		r.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("expected status 200, got %d", w.Code)
@@ -88,10 +103,14 @@ func TestGatewayHandler_List(t *testing.T) {
 	})
 
 	t.Run("list gateways with namespace filter", func(t *testing.T) {
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Get("/api/v1/gateways", handler.List)
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/gateways?namespace=ns1", nil)
 		w := httptest.NewRecorder()
 
-		handler.List(w, req)
+		r.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("expected status 200, got %d", w.Code)
@@ -136,10 +155,11 @@ func TestGatewayHandler_Get(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gw).Build()
 	k8sClient := kubernetes.NewForTest(fakeClient)
-	handler := &GatewayHandler{KubeClient: k8sClient}
+	handler := &GatewayHandler{}
 
 	t.Run("successful get", func(t *testing.T) {
 		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
 		r.Get("/{namespace}/{name}", handler.Get)
 
 		req := httptest.NewRequest(http.MethodGet, "/test-ns/test-gateway", nil)
@@ -169,6 +189,7 @@ func TestGatewayHandler_Get(t *testing.T) {
 
 	t.Run("gateway not found", func(t *testing.T) {
 		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
 		r.Get("/{namespace}/{name}", handler.Get)
 
 		req := httptest.NewRequest(http.MethodGet, "/bad-ns/bad-name", nil)
@@ -205,12 +226,16 @@ func TestGatewayHandler_ListClasses(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gc).Build()
 	k8sClient := kubernetes.NewForTest(fakeClient)
-	handler := &GatewayHandler{KubeClient: k8sClient}
+	handler := &GatewayHandler{}
+
+	r := chi.NewRouter()
+	r.Use(contextMiddleware(k8sClient))
+	r.Get("/api/v1/gatewayclasses", handler.ListClasses)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/gatewayclasses", nil)
 	w := httptest.NewRecorder()
 
-	handler.ListClasses(w, req)
+	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", w.Code)
@@ -246,10 +271,11 @@ func TestGatewayHandler_GetClass(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gc).Build()
 	k8sClient := kubernetes.NewForTest(fakeClient)
-	handler := &GatewayHandler{KubeClient: k8sClient}
+	handler := &GatewayHandler{}
 
 	t.Run("successful get", func(t *testing.T) {
 		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
 		r.Get("/{name}", handler.GetClass)
 
 		req := httptest.NewRequest(http.MethodGet, "/nginx", nil)
@@ -273,6 +299,7 @@ func TestGatewayHandler_GetClass(t *testing.T) {
 
 	t.Run("gateway class not found", func(t *testing.T) {
 		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
 		r.Get("/{name}", handler.GetClass)
 
 		req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)

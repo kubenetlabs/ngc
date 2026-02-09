@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { fetchHTTPRoutes } from "@/api/routes";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { useActiveCluster } from "@/hooks/useActiveCluster";
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -16,9 +17,10 @@ function timeAgo(dateStr: string): string {
 export default function RouteList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const nsFilter = searchParams.get("namespace") ?? "";
+  const activeCluster = useActiveCluster();
 
   const { data: routes, isLoading, error } = useQuery({
-    queryKey: ["httproutes", nsFilter],
+    queryKey: ["httproutes", activeCluster, nsFilter],
     queryFn: () => fetchHTTPRoutes(nsFilter || undefined),
   });
 

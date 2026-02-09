@@ -50,6 +50,41 @@ func New(kubeconfig string) (*Client, error) {
 	return &Client{client: c}, nil
 }
 
+// NewFromContext creates a new Kubernetes client using the specified kubeconfig path
+// and optional context name. This supports multi-cluster configurations where each
+// cluster may use a different kubeconfig file and/or context.
+func NewFromContext(kubeconfigPath, contextName string) (*Client, error) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("adding client-go scheme: %w", err)
+	}
+	if err := gatewayv1.Install(scheme); err != nil {
+		return nil, fmt.Errorf("adding gateway-api scheme: %w", err)
+	}
+	if err := apiextensionsv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("adding apiextensions scheme: %w", err)
+	}
+
+	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath}
+	overrides := &clientcmd.ConfigOverrides{}
+	if contextName != "" {
+		overrides.CurrentContext = contextName
+	}
+
+	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides).ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("building kubeconfig for context %q: %w", contextName, err)
+	}
+
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("creating controller-runtime client: %w", err)
+	}
+
+	slog.Info("kubernetes client initialized", "host", cfg.Host, "context", contextName)
+	return &Client{client: c}, nil
+}
+
 func resolveConfig(kubeconfig string) (*rest.Config, error) {
 	// Try in-cluster first.
 	if cfg, err := rest.InClusterConfig(); err == nil {

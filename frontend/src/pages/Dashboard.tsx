@@ -4,6 +4,7 @@ import { fetchGateways } from "@/api/gateways";
 import { fetchHTTPRoutes } from "@/api/routes";
 import { fetchConfig } from "@/api/config";
 import { useEdition } from "@/hooks/useEdition";
+import { useActiveCluster } from "@/hooks/useActiveCluster";
 
 function SummaryCard({
   label,
@@ -31,19 +32,20 @@ function SummaryCard({
 
 export default function Dashboard() {
   const { edition } = useEdition();
+  const activeCluster = useActiveCluster();
 
   const { data: gateways, isLoading: gwLoading } = useQuery({
-    queryKey: ["gateways"],
+    queryKey: ["gateways", activeCluster],
     queryFn: () => fetchGateways(),
   });
 
   const { data: routes, isLoading: rtLoading } = useQuery({
-    queryKey: ["httproutes"],
+    queryKey: ["httproutes", activeCluster],
     queryFn: () => fetchHTTPRoutes(),
   });
 
   const { data: config, isLoading: cfgLoading } = useQuery({
-    queryKey: ["config"],
+    queryKey: ["config", activeCluster],
     queryFn: fetchConfig,
   });
 

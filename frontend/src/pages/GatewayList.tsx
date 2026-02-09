@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchGateways } from "@/api/gateways";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { useActiveCluster } from "@/hooks/useActiveCluster";
 import type { Gateway } from "@/types/gateway";
 
 function timeAgo(dateStr: string): string {
@@ -21,9 +22,10 @@ function attachedRouteCount(gw: Gateway): number {
 export default function GatewayList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const nsFilter = searchParams.get("namespace") ?? "";
+  const activeCluster = useActiveCluster();
 
   const { data: gateways, isLoading, error } = useQuery({
-    queryKey: ["gateways", nsFilter],
+    queryKey: ["gateways", activeCluster, nsFilter],
     queryFn: () => fetchGateways(nsFilter || undefined),
   });
 

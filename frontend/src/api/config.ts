@@ -4,6 +4,7 @@ export interface AppConfig {
   edition: "oss" | "enterprise" | "unknown";
   version: string;
   connected: boolean;
+  cluster?: string;
 }
 
 export async function fetchConfig(): Promise<AppConfig> {

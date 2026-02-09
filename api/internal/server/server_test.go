@@ -12,6 +12,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
 	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
 )
 
@@ -84,7 +85,8 @@ func setupTestServer(t *testing.T) *httptest.Server {
 		Build()
 
 	k8sClient := kubernetes.NewForTest(fakeClient)
-	srv := New(Config{KubeClient: k8sClient})
+	mgr := cluster.NewSingleCluster(k8sClient)
+	srv := New(Config{ClusterManager: mgr})
 
 	return httptest.NewServer(srv.Router)
 }
@@ -146,6 +148,13 @@ func TestServer_Integration(t *testing.T) {
 			name:           "GET /api/v1/certificates (not implemented)",
 			path:           "/api/v1/certificates",
 			expectedStatus: http.StatusNotImplemented,
+			checkJSON:      true,
+			checkCORS:      true,
+		},
+		{
+			name:           "GET /api/v1/clusters",
+			path:           "/api/v1/clusters",
+			expectedStatus: http.StatusOK,
 			checkJSON:      true,
 			checkCORS:      true,
 		},
@@ -334,5 +343,173 @@ func TestServer_NotImplementedEndpoints(t *testing.T) {
 				t.Errorf("failed to decode JSON response: %v", err)
 			}
 		})
+	}
+}
+
+// Multi-cluster integration tests
+
+func setupMultiClusterTestServer(t *testing.T) *httptest.Server {
+	scheme := setupScheme(t)
+
+	// Cluster A data
+	gwA := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw-a", Namespace: "ns-a"},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: "nginx",
+			Listeners: []gatewayv1.Listener{
+				{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
+			},
+		},
+	}
+	fakeClientA := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gwA).Build()
+	clientA := kubernetes.NewForTest(fakeClientA)
+
+	// Cluster B data
+	gwB := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw-b", Namespace: "ns-b"},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: "nginx",
+			Listeners: []gatewayv1.Listener{
+				{Name: "http", Port: 8080, Protocol: gatewayv1.HTTPProtocolType},
+			},
+		},
+	}
+	fakeClientB := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gwB).Build()
+	clientB := kubernetes.NewForTest(fakeClientB)
+
+	mgr := cluster.NewForTest(
+		map[string]*kubernetes.Client{"cluster-a": clientA, "cluster-b": clientB},
+		"cluster-a",
+	)
+
+	srv := New(Config{ClusterManager: mgr})
+	return httptest.NewServer(srv.Router)
+}
+
+func TestServer_MultiCluster_ListClusters(t *testing.T) {
+	ts := setupMultiClusterTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/clusters")
+	if err != nil {
+		t.Fatalf("failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var clusters []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&clusters); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(clusters) != 2 {
+		t.Fatalf("expected 2 clusters, got %d", len(clusters))
+	}
+
+	// Sorted by name
+	if clusters[0]["name"] != "cluster-a" {
+		t.Errorf("expected first cluster cluster-a, got %v", clusters[0]["name"])
+	}
+	if clusters[1]["name"] != "cluster-b" {
+		t.Errorf("expected second cluster cluster-b, got %v", clusters[1]["name"])
+	}
+}
+
+func TestServer_MultiCluster_ClusterScopedGateways(t *testing.T) {
+	ts := setupMultiClusterTestServer(t)
+	defer ts.Close()
+
+	t.Run("cluster-a gateways", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/api/v1/clusters/cluster-a/gateways")
+		if err != nil {
+			t.Fatalf("failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", resp.StatusCode)
+		}
+
+		var gateways []map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&gateways); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if len(gateways) != 1 {
+			t.Fatalf("expected 1 gateway, got %d", len(gateways))
+		}
+		if gateways[0]["name"] != "gw-a" {
+			t.Errorf("expected gw-a, got %v", gateways[0]["name"])
+		}
+	})
+
+	t.Run("cluster-b gateways", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/api/v1/clusters/cluster-b/gateways")
+		if err != nil {
+			t.Fatalf("failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", resp.StatusCode)
+		}
+
+		var gateways []map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&gateways); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if len(gateways) != 1 {
+			t.Fatalf("expected 1 gateway, got %d", len(gateways))
+		}
+		if gateways[0]["name"] != "gw-b" {
+			t.Errorf("expected gw-b, got %v", gateways[0]["name"])
+		}
+	})
+}
+
+func TestServer_MultiCluster_UnknownCluster(t *testing.T) {
+	ts := setupMultiClusterTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/clusters/nonexistent/gateways")
+	if err != nil {
+		t.Fatalf("failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestServer_MultiCluster_LegacyRoute(t *testing.T) {
+	ts := setupMultiClusterTestServer(t)
+	defer ts.Close()
+
+	// Legacy route should use default cluster (cluster-a)
+	resp, err := http.Get(ts.URL + "/api/v1/gateways")
+	if err != nil {
+		t.Fatalf("failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var gateways []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&gateways); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(gateways) != 1 {
+		t.Fatalf("expected 1 gateway (default cluster), got %d", len(gateways))
+	}
+	if gateways[0]["name"] != "gw-a" {
+		t.Errorf("expected gw-a from default cluster, got %v", gateways[0]["name"])
 	}
 }
