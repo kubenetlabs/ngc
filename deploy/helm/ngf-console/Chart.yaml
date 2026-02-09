@@ -1,0 +1,14 @@
+apiVersion: v2
+name: ngf-console
+description: Web-based management platform for NGINX Gateway Fabric
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: F5 Product Incubation
+keywords:
+  - nginx
+  - gateway-api
+  - kubernetes
+  - inference
+  - gpu

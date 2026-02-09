@@ -1,0 +1,53 @@
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# F5 License Files
+*.crt
+*.jwt
+*.key
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+.docker/
+
+# Helm
+deploy/helm/ngf-console/charts/
+*.tgz
+
+# Coverage
+coverage/
+*.coverprofile
+
+# OS
+Thumbs.db

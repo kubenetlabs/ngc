@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build
+
+  api:
+    name: API
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: api/go.sum
+      - run: go build ./...
+      - run: go test ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: api
+
+  controller:
+    name: Controller
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: controller
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: controller/go.sum
+      - run: go build ./...
+      - run: go test ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: controller
+
+  migration-cli:
+    name: Migration CLI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: migration-cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: migration-cli/go.sum
+      - run: go build ./...
+      - run: go test ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: migration-cli
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [frontend, api, controller, migration-cli]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build frontend image
+        run: docker build -t ngf-console-frontend:ci frontend/
+      - name: Build API image
+        run: docker build -t ngf-console-api:ci api/
+      - name: Build controller image
+        run: docker build -t ngf-console-controller:ci controller/
+      - name: Build migration CLI image
+        run: docker build -t ngf-console-migration:ci migration-cli/

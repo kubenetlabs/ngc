@@ -1,0 +1,22 @@
+{{- if .Values.clickhouse.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ngf-console.fullname" . }}-clickhouse
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ngf-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8123
+      targetPort: http
+      name: http
+    - port: 9000
+      targetPort: native
+      name: native
+  selector:
+    {{- include "ngf-console.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+{{- end }}

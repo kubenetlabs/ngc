@@ -1,0 +1,131 @@
+ngf:
+  edition: enterprise
+  controllerNamespace: nginx-gateway
+
+frontend:
+  replicas: 2
+  image:
+    repository: registry.f5.com/ngf-console/frontend
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+api:
+  replicas: 2
+  image:
+    repository: registry.f5.com/ngf-console/api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+controller:
+  replicas: 1
+  image:
+    repository: registry.f5.com/ngf-console/controller
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+database:
+  type: postgresql
+  postgresql:
+    host: ""
+    port: 5432
+    database: ngf_console
+    existingSecret: ""
+  sqlite:
+    path: /data/ngf-console.db
+    persistence:
+      enabled: true
+      size: 1Gi
+
+clickhouse:
+  enabled: true
+  replicas: 1
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "24.1"
+  persistence:
+    size: 50Gi
+  retention:
+    rawLogs: 7d
+    rollups1m: 90d
+    rollups1h: 365d
+
+otelCollector:
+  enabled: true
+  mode: deployment
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: "latest"
+
+prometheus:
+  url: http://prometheus:9090
+
+grafana:
+  enabled: false
+  url: http://grafana:3000
+
+inference:
+  enabled: true
+  dcgmExporter:
+    enabled: true
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.5-3.4.0-ubuntu22.04
+  tritonMetrics:
+    scrapeInterval: 5s
+    metricsPath: /metrics
+  scaling:
+    backend: keda
+    kedaNamespace: keda
+  costEstimation:
+    enabled: true
+    gpuPricing:
+      A100: 3.67
+      H100: 8.10
+      L40S: 1.84
+      T4: 0.53
+
+xc:
+  enabled: false
+  tenantUrl: ""
+  apiTokenSecretRef: ""
+  defaultNamespace: default
+  defaultWafPolicy: ""
+
+auth:
+  type: kubernetes
+  oidc:
+    issuerUrl: ""
+    clientId: ""
+    clientSecretRef: ""
+
+ingress:
+  enabled: true
+  className: nginx-gateway-fabric
+  hostname: ngf-console.example.com
+  tls:
+    enabled: true
+    secretName: ngf-console-tls
+
+serviceAccount:
+  create: true
+  name: ngf-console
+  annotations: {}

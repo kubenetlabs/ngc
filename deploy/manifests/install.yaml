@@ -1,0 +1,3 @@
+# Generated from Helm template.
+# Run: make generate-manifests
+# Or: helm template ngf-console deploy/helm/ngf-console > deploy/manifests/install.yaml
