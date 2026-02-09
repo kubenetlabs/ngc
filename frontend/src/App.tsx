@@ -1,7 +1,9 @@
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { routes } from "./routes";
+import { fetchConfig } from "./api/config";
+import { useSettingsStore } from "./store/settingsStore";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,9 +16,27 @@ const queryClient = new QueryClient({
 
 const router = createBrowserRouter(routes);
 
+function EditionDetector() {
+  const setEdition = useSettingsStore((s) => s.setEdition);
+  const { data } = useQuery({
+    queryKey: ["config"],
+    queryFn: fetchConfig,
+    staleTime: Infinity,
+  });
+
+  useEffect(() => {
+    if (data?.edition) {
+      setEdition(data.edition);
+    }
+  }, [data?.edition, setEdition]);
+
+  return null;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <EditionDetector />
       <Suspense
         fallback={
           <div className="flex h-screen items-center justify-center">

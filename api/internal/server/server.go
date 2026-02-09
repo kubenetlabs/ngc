@@ -8,15 +8,22 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/kubenetlabs/ngc/api/internal/handlers"
+	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
 )
+
+// Config holds server dependencies.
+type Config struct {
+	KubeClient *kubernetes.Client
+}
 
 // Server is the main HTTP server for the NGF Console API.
 type Server struct {
 	Router chi.Router
+	Config Config
 }
 
 // New creates a new Server with all routes and middleware configured.
-func New() *Server {
+func New(cfg Config) *Server {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -25,7 +32,7 @@ func New() *Server {
 	r.Use(CORSMiddleware)
 	r.Use(chimw.Recoverer)
 
-	s := &Server{Router: r}
+	s := &Server{Router: r, Config: cfg}
 	s.registerRoutes()
 
 	return s
@@ -39,8 +46,9 @@ func (s *Server) Run(addr string) error {
 
 // registerRoutes mounts all API v1 route groups.
 func (s *Server) registerRoutes() {
-	gw := &handlers.GatewayHandler{}
-	rt := &handlers.RouteHandler{}
+	gw := &handlers.GatewayHandler{KubeClient: s.Config.KubeClient}
+	rt := &handlers.RouteHandler{KubeClient: s.Config.KubeClient}
+	cfgHandler := &handlers.ConfigHandler{KubeClient: s.Config.KubeClient}
 	pol := &handlers.PolicyHandler{}
 	cert := &handlers.CertificateHandler{}
 	met := &handlers.MetricsHandler{}
@@ -56,66 +64,69 @@ func (s *Server) registerRoutes() {
 	aud := &handlers.AuditHandler{}
 
 	s.Router.Route("/api/v1", func(r chi.Router) {
-		// Gateway Classes
+		// Config
+		r.Get("/config", cfgHandler.GetConfig)
+
+		// Gateway Classes (cluster-scoped, separate handlers)
 		r.Route("/gatewayclasses", func(r chi.Router) {
-			r.Get("/", gw.List)
-			r.Get("/{name}", gw.Get)
+			r.Get("/", gw.ListClasses)
+			r.Get("/{name}", gw.GetClass)
 		})
 
-		// Gateways
+		// Gateways (namespace-aware)
 		r.Route("/gateways", func(r chi.Router) {
 			r.Get("/", gw.List)
 			r.Post("/", gw.Create)
-			r.Get("/{name}", gw.Get)
-			r.Put("/{name}", gw.Update)
-			r.Delete("/{name}", gw.Delete)
-			r.Post("/{name}/deploy", gw.Deploy)
+			r.Get("/{namespace}/{name}", gw.Get)
+			r.Put("/{namespace}/{name}", gw.Update)
+			r.Delete("/{namespace}/{name}", gw.Delete)
+			r.Post("/{namespace}/{name}/deploy", gw.Deploy)
 		})
 
-		// HTTP Routes
+		// HTTP Routes (namespace-aware)
 		r.Route("/httproutes", func(r chi.Router) {
 			r.Get("/", rt.List)
 			r.Post("/", rt.Create)
-			r.Get("/{name}", rt.Get)
-			r.Put("/{name}", rt.Update)
-			r.Delete("/{name}", rt.Delete)
-			r.Post("/{name}/simulate", rt.Simulate)
+			r.Get("/{namespace}/{name}", rt.Get)
+			r.Put("/{namespace}/{name}", rt.Update)
+			r.Delete("/{namespace}/{name}", rt.Delete)
+			r.Post("/{namespace}/{name}/simulate", rt.Simulate)
 		})
 
 		// gRPC Routes
 		r.Route("/grpcroutes", func(r chi.Router) {
 			r.Get("/", rt.List)
 			r.Post("/", rt.Create)
-			r.Get("/{name}", rt.Get)
-			r.Put("/{name}", rt.Update)
-			r.Delete("/{name}", rt.Delete)
+			r.Get("/{namespace}/{name}", rt.Get)
+			r.Put("/{namespace}/{name}", rt.Update)
+			r.Delete("/{namespace}/{name}", rt.Delete)
 		})
 
 		// TLS Routes
 		r.Route("/tlsroutes", func(r chi.Router) {
 			r.Get("/", rt.List)
 			r.Post("/", rt.Create)
-			r.Get("/{name}", rt.Get)
-			r.Put("/{name}", rt.Update)
-			r.Delete("/{name}", rt.Delete)
+			r.Get("/{namespace}/{name}", rt.Get)
+			r.Put("/{namespace}/{name}", rt.Update)
+			r.Delete("/{namespace}/{name}", rt.Delete)
 		})
 
 		// TCP Routes
 		r.Route("/tcproutes", func(r chi.Router) {
 			r.Get("/", rt.List)
 			r.Post("/", rt.Create)
-			r.Get("/{name}", rt.Get)
-			r.Put("/{name}", rt.Update)
-			r.Delete("/{name}", rt.Delete)
+			r.Get("/{namespace}/{name}", rt.Get)
+			r.Put("/{namespace}/{name}", rt.Update)
+			r.Delete("/{namespace}/{name}", rt.Delete)
 		})
 
 		// UDP Routes
 		r.Route("/udproutes", func(r chi.Router) {
 			r.Get("/", rt.List)
 			r.Post("/", rt.Create)
-			r.Get("/{name}", rt.Get)
-			r.Put("/{name}", rt.Update)
-			r.Delete("/{name}", rt.Delete)
+			r.Get("/{namespace}/{name}", rt.Get)
+			r.Put("/{namespace}/{name}", rt.Update)
+			r.Delete("/{namespace}/{name}", rt.Delete)
 		})
 
 		// Policies

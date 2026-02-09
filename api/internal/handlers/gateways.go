@@ -3,19 +3,71 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
 )
 
 // GatewayHandler handles Gateway and GatewayClass API requests.
-type GatewayHandler struct{}
-
-// List returns all gateways or gateway classes.
-func (h *GatewayHandler) List(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+type GatewayHandler struct {
+	KubeClient *kubernetes.Client
 }
 
-// Get returns a single gateway or gateway class by name.
+// List returns all gateways, optionally filtered by ?namespace= query param.
+func (h *GatewayHandler) List(w http.ResponseWriter, r *http.Request) {
+	ns := r.URL.Query().Get("namespace")
+	gateways, err := h.KubeClient.ListGateways(r.Context(), ns)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	resp := make([]GatewayResponse, 0, len(gateways))
+	for i := range gateways {
+		resp = append(resp, toGatewayResponse(&gateways[i]))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// Get returns a single gateway by namespace and name.
 func (h *GatewayHandler) Get(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+	ns := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+
+	gw, err := h.KubeClient.GetGateway(r.Context(), ns, name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toGatewayResponse(gw))
+}
+
+// ListClasses returns all GatewayClasses.
+func (h *GatewayHandler) ListClasses(w http.ResponseWriter, r *http.Request) {
+	classes, err := h.KubeClient.ListGatewayClasses(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	resp := make([]GatewayClassResponse, 0, len(classes))
+	for i := range classes {
+		resp = append(resp, toGatewayClassResponse(&classes[i]))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetClass returns a single GatewayClass by name.
+func (h *GatewayHandler) GetClass(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	gc, err := h.KubeClient.GetGatewayClass(r.Context(), name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toGatewayClassResponse(gc))
 }
 
 // Create creates a new gateway.
