@@ -64,6 +64,34 @@ func (c *Client) ListHTTPRoutes(ctx context.Context, namespace string) ([]gatewa
 	return list.Items, nil
 }
 
+// CreateGateway creates a new Gateway and returns the server-populated object.
+func (c *Client) CreateGateway(ctx context.Context, gw *gatewayv1.Gateway) (*gatewayv1.Gateway, error) {
+	if err := c.client.Create(ctx, gw); err != nil {
+		return nil, fmt.Errorf("creating gateway %s/%s: %w", gw.Namespace, gw.Name, err)
+	}
+	return gw, nil
+}
+
+// UpdateGateway updates an existing Gateway and returns the server-populated object.
+func (c *Client) UpdateGateway(ctx context.Context, gw *gatewayv1.Gateway) (*gatewayv1.Gateway, error) {
+	if err := c.client.Update(ctx, gw); err != nil {
+		return nil, fmt.Errorf("updating gateway %s/%s: %w", gw.Namespace, gw.Name, err)
+	}
+	return gw, nil
+}
+
+// DeleteGateway deletes a Gateway by namespace and name.
+func (c *Client) DeleteGateway(ctx context.Context, namespace, name string) error {
+	gw, err := c.GetGateway(ctx, namespace, name)
+	if err != nil {
+		return fmt.Errorf("fetching gateway for deletion %s/%s: %w", namespace, name, err)
+	}
+	if err := c.client.Delete(ctx, gw); err != nil {
+		return fmt.Errorf("deleting gateway %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
 // GetHTTPRoute returns a single HTTPRoute by namespace and name.
 func (c *Client) GetHTTPRoute(ctx context.Context, namespace, name string) (*gatewayv1.HTTPRoute, error) {
 	var hr gatewayv1.HTTPRoute

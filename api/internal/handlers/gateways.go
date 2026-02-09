@@ -94,17 +94,81 @@ func (h *GatewayHandler) GetClass(w http.ResponseWriter, r *http.Request) {
 
 // Create creates a new gateway.
 func (h *GatewayHandler) Create(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	var req CreateGatewayRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	if req.Name == "" || req.Namespace == "" || req.GatewayClassName == "" || len(req.Listeners) == 0 {
+		writeError(w, http.StatusBadRequest, "name, namespace, gatewayClassName, and at least one listener are required")
+		return
+	}
+
+	gw := toGatewayObject(req)
+	created, err := k8s.CreateGateway(r.Context(), gw)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, toGatewayResponse(created))
 }
 
 // Update modifies an existing gateway.
 func (h *GatewayHandler) Update(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	ns := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+
+	var req UpdateGatewayRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	existing, err := k8s.GetGateway(r.Context(), ns, name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	applyUpdateToGateway(existing, req)
+
+	updated, err := k8s.UpdateGateway(r.Context(), existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toGatewayResponse(updated))
 }
 
 // Delete removes a gateway.
 func (h *GatewayHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	ns := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+
+	if err := k8s.DeleteGateway(r.Context(), ns, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "gateway deleted", "name": name, "namespace": ns})
 }
 
 // Deploy triggers a gateway deployment.

@@ -1,12 +1,14 @@
-import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { fetchGateway } from "@/api/gateways";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { fetchGateway, deleteGateway } from "@/api/gateways";
 import { fetchHTTPRoutes } from "@/api/routes";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
 
 export default function GatewayDetail() {
   const { ns, name } = useParams<{ ns: string; name: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const activeCluster = useActiveCluster();
 
   const { data: gw, isLoading, error } = useQuery({
@@ -27,16 +29,45 @@ export default function GatewayDetail() {
     ),
   );
 
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteGateway(ns!, name!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gateways"] });
+      navigate("/gateways");
+    },
+  });
+
+  const handleDelete = () => {
+    if (window.confirm(`Delete gateway "${name}" in namespace "${ns}"?`)) {
+      deleteMutation.mutate();
+    }
+  };
+
   if (isLoading) return <p className="text-muted-foreground">Loading gateway...</p>;
   if (error) return <p className="text-red-400">Failed to load gateway: {String(error)}</p>;
   if (!gw) return <p className="text-muted-foreground">Gateway not found.</p>;
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-6 flex items-center justify-between">
         <Link to="/gateways" className="text-sm text-blue-400 hover:underline">
           &larr; Back to Gateways
         </Link>
+        <div className="flex gap-2">
+          <Link
+            to={`/gateways/${ns}/${name}/edit`}
+            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted/30"
+          >
+            Edit
+          </Link>
+          <button
+            onClick={handleDelete}
+            disabled={deleteMutation.isPending}
+            className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            {deleteMutation.isPending ? "Deleting..." : "Delete"}
+          </button>
+        </div>
       </div>
 
       <h1 className="text-2xl font-bold">{gw.name}</h1>

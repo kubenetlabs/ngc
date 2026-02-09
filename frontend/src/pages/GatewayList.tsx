@@ -36,7 +36,7 @@ export default function GatewayList() {
           <h1 className="text-2xl font-bold">Gateways</h1>
           <p className="mt-1 text-muted-foreground">Manage Gateway resources.</p>
         </div>
-        <div>
+        <div className="flex items-center gap-3">
           <input
             type="text"
             placeholder="Filter by namespace..."
@@ -48,6 +48,12 @@ export default function GatewayList() {
             }}
             className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
+          <Link
+            to="/gateways/create"
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Create Gateway
+          </Link>
         </div>
       </div>
 

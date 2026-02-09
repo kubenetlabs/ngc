@@ -1,15 +1,30 @@
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createGateway, fetchGatewayClasses } from "@/api/gateways";
-import { createGatewaySchema, type CreateGatewayFormData } from "@/types/gateway";
+import { fetchGateway, fetchGatewayClasses, updateGateway } from "@/api/gateways";
+import { listenerSchema, type UpdateGatewayPayload } from "@/types/gateway";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
+import { z } from "zod";
 
-export default function GatewayCreate() {
+const updateGatewaySchema = z.object({
+  gatewayClassName: z.string().min(1, "Gateway class is required"),
+  listeners: z.array(listenerSchema).min(1, "At least one listener is required"),
+});
+
+type UpdateGatewayFormData = z.infer<typeof updateGatewaySchema>;
+
+export default function GatewayEdit() {
+  const { ns, name } = useParams<{ ns: string; name: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activeCluster = useActiveCluster();
+
+  const { data: gw, isLoading } = useQuery({
+    queryKey: ["gateway", activeCluster, ns, name],
+    queryFn: () => fetchGateway(ns!, name!),
+    enabled: !!ns && !!name,
+  });
 
   const { data: gatewayClasses } = useQuery({
     queryKey: ["gatewayclasses", activeCluster],
@@ -21,28 +36,34 @@ export default function GatewayCreate() {
     control,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<CreateGatewayFormData>({
-    resolver: zodResolver(createGatewaySchema),
-    defaultValues: {
-      name: "",
-      namespace: "default",
-      gatewayClassName: "",
-      listeners: [{ name: "http", port: 80, protocol: "HTTP", hostname: "" }],
-    },
+  } = useForm<UpdateGatewayFormData>({
+    resolver: zodResolver(updateGatewaySchema),
+    values: gw
+      ? {
+          gatewayClassName: gw.gatewayClassName,
+          listeners: gw.listeners.map((l) => ({
+            name: l.name,
+            port: l.port,
+            protocol: l.protocol,
+            hostname: l.hostname ?? "",
+          })),
+        }
+      : undefined,
   });
 
   const { fields, append, remove } = useFieldArray({ control, name: "listeners" });
 
   const mutation = useMutation({
-    mutationFn: createGateway,
+    mutationFn: (payload: UpdateGatewayPayload) => updateGateway(ns!, name!, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["gateways"] });
-      navigate("/gateways");
+      queryClient.invalidateQueries({ queryKey: ["gateway", activeCluster, ns, name] });
+      navigate(`/gateways/${ns}/${name}`);
     },
   });
 
-  const onSubmit = (data: CreateGatewayFormData) => {
-    const payload = {
+  const onSubmit = (data: UpdateGatewayFormData) => {
+    const payload: UpdateGatewayPayload = {
       ...data,
       listeners: data.listeners.map((l) => ({
         ...l,
@@ -52,16 +73,21 @@ export default function GatewayCreate() {
     mutation.mutate(payload);
   };
 
+  if (isLoading) return <p className="text-muted-foreground">Loading gateway...</p>;
+  if (!gw) return <p className="text-muted-foreground">Gateway not found.</p>;
+
   return (
     <div>
       <div className="mb-6">
-        <Link to="/gateways" className="text-sm text-blue-400 hover:underline">
-          &larr; Back to Gateways
+        <Link to={`/gateways/${ns}/${name}`} className="text-sm text-blue-400 hover:underline">
+          &larr; Back to {name}
         </Link>
       </div>
 
-      <h1 className="text-2xl font-bold">Create Gateway</h1>
-      <p className="mt-1 text-muted-foreground">Create a new Gateway resource.</p>
+      <h1 className="text-2xl font-bold">Edit Gateway</h1>
+      <p className="mt-1 text-muted-foreground">
+        {ns}/{name}
+      </p>
 
       {mutation.isError && (
         <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
@@ -70,32 +96,16 @@ export default function GatewayCreate() {
       )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 max-w-2xl space-y-6">
-        {/* Name */}
+        {/* Name (read-only) */}
         <div>
-          <label htmlFor="name" className="block text-sm font-medium">
-            Name
-          </label>
-          <input
-            id="name"
-            {...register("name")}
-            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="my-gateway"
-          />
-          {errors.name && <p className="mt-1 text-xs text-red-400">{errors.name.message}</p>}
+          <label className="block text-sm font-medium">Name</label>
+          <p className="mt-1 font-mono text-sm text-muted-foreground">{name}</p>
         </div>
 
-        {/* Namespace */}
+        {/* Namespace (read-only) */}
         <div>
-          <label htmlFor="namespace" className="block text-sm font-medium">
-            Namespace
-          </label>
-          <input
-            id="namespace"
-            {...register("namespace")}
-            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="default"
-          />
-          {errors.namespace && <p className="mt-1 text-xs text-red-400">{errors.namespace.message}</p>}
+          <label className="block text-sm font-medium">Namespace</label>
+          <p className="mt-1 font-mono text-sm text-muted-foreground">{ns}</p>
         </div>
 
         {/* Gateway Class */}
@@ -215,10 +225,10 @@ export default function GatewayCreate() {
             disabled={isSubmitting || mutation.isPending}
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {mutation.isPending ? "Creating..." : "Create Gateway"}
+            {mutation.isPending ? "Saving..." : "Save Changes"}
           </button>
           <Link
-            to="/gateways"
+            to={`/gateways/${ns}/${name}`}
             className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/30"
           >
             Cancel

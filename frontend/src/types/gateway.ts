@@ -68,3 +68,39 @@ export interface Gateway {
   status?: GatewayStatus;
   createdAt: string;
 }
+
+// --- CRUD payload types ---
+
+import { z } from "zod";
+
+export interface CreateGatewayPayload {
+  name: string;
+  namespace: string;
+  gatewayClassName: string;
+  listeners: { name: string; port: number; protocol: string; hostname?: string }[];
+}
+
+export interface UpdateGatewayPayload {
+  gatewayClassName: string;
+  listeners: { name: string; port: number; protocol: string; hostname?: string }[];
+}
+
+export const listenerSchema = z.object({
+  name: z.string().min(1, "Listener name is required"),
+  port: z.number().int().min(1).max(65535),
+  protocol: z.enum(["HTTP", "HTTPS", "TLS", "TCP", "UDP"]),
+  hostname: z.string().optional(),
+});
+
+export const createGatewaySchema = z.object({
+  name: z
+    .string()
+    .min(1, "Name is required")
+    .max(253)
+    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "Must be a valid Kubernetes name"),
+  namespace: z.string().min(1, "Namespace is required"),
+  gatewayClassName: z.string().min(1, "Gateway class is required"),
+  listeners: z.array(listenerSchema).min(1, "At least one listener is required"),
+});
+
+export type CreateGatewayFormData = z.infer<typeof createGatewaySchema>;

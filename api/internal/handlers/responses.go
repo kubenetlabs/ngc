@@ -404,6 +404,78 @@ func convertConditions(conditions []metav1.Condition) []ConditionResponse {
 	return result
 }
 
+// Request types for Gateway CRUD
+
+type CreateGatewayRequest struct {
+	Name             string            `json:"name"`
+	Namespace        string            `json:"namespace"`
+	GatewayClassName string            `json:"gatewayClassName"`
+	Listeners        []ListenerRequest `json:"listeners"`
+	Labels           map[string]string `json:"labels,omitempty"`
+	Annotations      map[string]string `json:"annotations,omitempty"`
+}
+
+type UpdateGatewayRequest struct {
+	GatewayClassName string            `json:"gatewayClassName"`
+	Listeners        []ListenerRequest `json:"listeners"`
+	Labels           map[string]string `json:"labels,omitempty"`
+	Annotations      map[string]string `json:"annotations,omitempty"`
+}
+
+type ListenerRequest struct {
+	Name     string  `json:"name"`
+	Port     int32   `json:"port"`
+	Protocol string  `json:"protocol"`
+	Hostname *string `json:"hostname,omitempty"`
+}
+
+func toGatewayObject(req CreateGatewayRequest) *gatewayv1.Gateway {
+	gw := &gatewayv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        req.Name,
+			Namespace:   req.Namespace,
+			Labels:      req.Labels,
+			Annotations: req.Annotations,
+		},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: gatewayv1.ObjectName(req.GatewayClassName),
+			Listeners:        make([]gatewayv1.Listener, 0, len(req.Listeners)),
+		},
+	}
+	for _, l := range req.Listeners {
+		listener := gatewayv1.Listener{
+			Name:     gatewayv1.SectionName(l.Name),
+			Port:     gatewayv1.PortNumber(l.Port),
+			Protocol: gatewayv1.ProtocolType(l.Protocol),
+		}
+		if l.Hostname != nil {
+			h := gatewayv1.Hostname(*l.Hostname)
+			listener.Hostname = &h
+		}
+		gw.Spec.Listeners = append(gw.Spec.Listeners, listener)
+	}
+	return gw
+}
+
+func applyUpdateToGateway(gw *gatewayv1.Gateway, req UpdateGatewayRequest) {
+	gw.Spec.GatewayClassName = gatewayv1.ObjectName(req.GatewayClassName)
+	gw.Labels = req.Labels
+	gw.Annotations = req.Annotations
+	gw.Spec.Listeners = make([]gatewayv1.Listener, 0, len(req.Listeners))
+	for _, l := range req.Listeners {
+		listener := gatewayv1.Listener{
+			Name:     gatewayv1.SectionName(l.Name),
+			Port:     gatewayv1.PortNumber(l.Port),
+			Protocol: gatewayv1.ProtocolType(l.Protocol),
+		}
+		if l.Hostname != nil {
+			h := gatewayv1.Hostname(*l.Hostname)
+			listener.Hostname = &h
+		}
+		gw.Spec.Listeners = append(gw.Spec.Listeners, listener)
+	}
+}
+
 // Shared response helpers
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

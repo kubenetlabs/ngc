@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -318,6 +319,230 @@ func TestGatewayHandler_GetClass(t *testing.T) {
 
 		if resp["error"] == "" {
 			t.Error("expected error message")
+		}
+	})
+}
+
+func TestGatewayHandler_Create(t *testing.T) {
+	scheme := setupScheme(t)
+	handler := &GatewayHandler{}
+
+	t.Run("successful create", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Post("/api/v1/gateways", handler.Create)
+
+		body := `{
+			"name": "my-gateway",
+			"namespace": "default",
+			"gatewayClassName": "nginx",
+			"listeners": [{"name": "http", "port": 80, "protocol": "HTTP"}]
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/gateways", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Errorf("expected status 201, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var resp GatewayResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if resp.Name != "my-gateway" {
+			t.Errorf("expected name my-gateway, got %s", resp.Name)
+		}
+		if resp.Namespace != "default" {
+			t.Errorf("expected namespace default, got %s", resp.Namespace)
+		}
+		if resp.GatewayClassName != "nginx" {
+			t.Errorf("expected gatewayClassName nginx, got %s", resp.GatewayClassName)
+		}
+		if len(resp.Listeners) != 1 {
+			t.Fatalf("expected 1 listener, got %d", len(resp.Listeners))
+		}
+	})
+
+	t.Run("missing required fields", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Post("/api/v1/gateways", handler.Create)
+
+		body := `{"name": "my-gateway"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/gateways", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Post("/api/v1/gateways", handler.Create)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/gateways", strings.NewReader("{invalid"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+	})
+}
+
+func TestGatewayHandler_Update(t *testing.T) {
+	scheme := setupScheme(t)
+	handler := &GatewayHandler{}
+
+	t.Run("successful update", func(t *testing.T) {
+		existing := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-gw",
+				Namespace: "default",
+			},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: "nginx",
+				Listeners: []gatewayv1.Listener{
+					{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
+				},
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Put("/{namespace}/{name}", handler.Update)
+
+		body := `{
+			"gatewayClassName": "nginx",
+			"listeners": [
+				{"name": "http", "port": 80, "protocol": "HTTP"},
+				{"name": "https", "port": 443, "protocol": "HTTPS"}
+			]
+		}`
+		req := httptest.NewRequest(http.MethodPut, "/default/test-gw", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var resp GatewayResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if len(resp.Listeners) != 2 {
+			t.Errorf("expected 2 listeners after update, got %d", len(resp.Listeners))
+		}
+	})
+
+	t.Run("nonexistent gateway", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Put("/{namespace}/{name}", handler.Update)
+
+		body := `{
+			"gatewayClassName": "nginx",
+			"listeners": [{"name": "http", "port": 80, "protocol": "HTTP"}]
+		}`
+		req := httptest.NewRequest(http.MethodPut, "/default/nonexistent", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+	})
+}
+
+func TestGatewayHandler_Delete(t *testing.T) {
+	scheme := setupScheme(t)
+	handler := &GatewayHandler{}
+
+	t.Run("successful delete", func(t *testing.T) {
+		existing := &gatewayv1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-gw",
+				Namespace: "default",
+			},
+			Spec: gatewayv1.GatewaySpec{
+				GatewayClassName: "nginx",
+				Listeners: []gatewayv1.Listener{
+					{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
+				},
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Delete("/{namespace}/{name}", handler.Delete)
+
+		req := httptest.NewRequest(http.MethodDelete, "/default/test-gw", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var resp map[string]string
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if resp["message"] != "gateway deleted" {
+			t.Errorf("expected 'gateway deleted' message, got %s", resp["message"])
+		}
+	})
+
+	t.Run("nonexistent gateway", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Delete("/{namespace}/{name}", handler.Delete)
+
+		req := httptest.NewRequest(http.MethodDelete, "/default/nonexistent", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
 		}
 	})
 }

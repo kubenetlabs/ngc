@@ -6,6 +6,7 @@ const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const GatewayList = lazy(() => import("@/pages/GatewayList"));
 const GatewayCreate = lazy(() => import("@/pages/GatewayCreate"));
 const GatewayDetail = lazy(() => import("@/pages/GatewayDetail"));
+const GatewayEdit = lazy(() => import("@/pages/GatewayEdit"));
 const InferenceOverview = lazy(() => import("@/pages/InferenceOverview"));
 const InferencePoolList = lazy(() => import("@/pages/InferencePoolList"));
 const InferencePoolCreate = lazy(() => import("@/pages/InferencePoolCreate"));
@@ -34,6 +35,7 @@ export const routes: RouteObject[] = [
       { path: "gateways", element: <GatewayList /> },
       { path: "gateways/create", element: <GatewayCreate /> },
       { path: "gateways/:ns/:name", element: <GatewayDetail /> },
+      { path: "gateways/:ns/:name/edit", element: <GatewayEdit /> },
       { path: "inference", element: <InferenceOverview /> },
       { path: "inference/pools", element: <InferencePoolList /> },
       { path: "inference/pools/create", element: <InferencePoolCreate /> },
