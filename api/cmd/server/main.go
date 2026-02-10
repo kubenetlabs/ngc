@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"os"
 
+	chprovider "github.com/kubenetlabs/ngc/api/internal/clickhouse"
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/inference"
 	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
 	"github.com/kubenetlabs/ngc/api/internal/server"
 	"github.com/kubenetlabs/ngc/api/pkg/version"
@@ -16,7 +18,7 @@ func main() {
 	port := flag.Int("port", 8080, "HTTP server listen port")
 	kubeconfig := flag.String("kubeconfig", "", "Path to kubeconfig file (optional, defaults to in-cluster or ~/.kube/config)")
 	clustersConfig := flag.String("clusters-config", "", "Path to clusters YAML config (enables multi-cluster)")
-	dbType := flag.String("db-type", "clickhouse", "Database backend type (clickhouse)")
+	dbType := flag.String("db-type", "mock", "Metrics provider backend (mock, clickhouse)")
 	clickhouseURL := flag.String("clickhouse-url", "localhost:9000", "ClickHouse connection URL")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
@@ -61,8 +63,25 @@ func main() {
 		slog.Info("single-cluster mode")
 	}
 
+	// Initialize metrics provider (mock for dev, ClickHouse for prod)
+	var metricsProvider inference.MetricsProvider
+	if *dbType == "clickhouse" && *clickhouseURL != "" {
+		chClient, err := chprovider.New(*clickhouseURL)
+		if err != nil {
+			slog.Warn("failed to create clickhouse client, falling back to mock", "error", err)
+			metricsProvider = inference.NewMockProvider()
+		} else {
+			metricsProvider = chprovider.NewProvider(chClient)
+			slog.Info("using clickhouse metrics provider", "url", *clickhouseURL)
+		}
+	} else {
+		metricsProvider = inference.NewMockProvider()
+		slog.Info("using mock metrics provider")
+	}
+
 	srv := server.New(server.Config{
-		ClusterManager: mgr,
+		ClusterManager:  mgr,
+		MetricsProvider: metricsProvider,
 	})
 
 	addr := fmt.Sprintf(":%d", *port)

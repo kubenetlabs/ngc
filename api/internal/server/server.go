@@ -9,17 +9,20 @@ import (
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
 	"github.com/kubenetlabs/ngc/api/internal/handlers"
+	"github.com/kubenetlabs/ngc/api/internal/inference"
 )
 
 // Config holds server dependencies.
 type Config struct {
-	ClusterManager *cluster.Manager
+	ClusterManager  *cluster.Manager
+	MetricsProvider inference.MetricsProvider
 }
 
 // Server is the main HTTP server for the NGF Console API.
 type Server struct {
 	Router chi.Router
 	Config Config
+	Hub    *Hub
 }
 
 // New creates a new Server with all routes and middleware configured.
@@ -32,7 +35,11 @@ func New(cfg Config) *Server {
 	r.Use(CORSMiddleware)
 	r.Use(chimw.Recoverer)
 
-	s := &Server{Router: r, Config: cfg}
+	hub := NewHub()
+	RegisterInferenceTopics(hub)
+	hub.Start()
+
+	s := &Server{Router: r, Config: cfg, Hub: hub}
 	s.registerRoutes()
 
 	return s
@@ -56,8 +63,8 @@ func (s *Server) registerRoutes() {
 	lg := &handlers.LogHandler{}
 	topo := &handlers.TopologyHandler{}
 	diag := &handlers.DiagnosticsHandler{}
-	inf := &handlers.InferenceHandler{}
-	infMet := &handlers.InferenceMetricsHandler{}
+	inf := &handlers.InferenceHandler{Provider: s.Config.MetricsProvider}
+	infMet := &handlers.InferenceMetricsHandler{Provider: s.Config.MetricsProvider}
 	infDiag := &handlers.InferenceDiagHandler{}
 	coex := &handlers.CoexistenceHandler{}
 	xc := &handlers.XCHandler{}
@@ -85,6 +92,11 @@ func (s *Server) registerRoutes() {
 
 		// Events
 		r.Get("/events", HandleWebSocket)
+
+		// Inference WebSocket topics
+		r.Get("/ws/inference/epp-decisions", s.Hub.ServeWS("epp-decisions"))
+		r.Get("/ws/inference/gpu-metrics", s.Hub.ServeWS("gpu-metrics"))
+		r.Get("/ws/inference/scaling-events", s.Hub.ServeWS("scaling-events"))
 	})
 }
 
@@ -243,6 +255,12 @@ func (s *Server) mountResourceRoutes(
 			r.Get("/by-pool", infMet.ByPool)
 			r.Get("/pods", infMet.PodMetrics)
 			r.Get("/cost", infMet.Cost)
+			r.Get("/epp-decisions", infMet.EPPDecisions)
+			r.Get("/ttft-histogram/{pool}", infMet.TTFTHistogram)
+			r.Get("/tps-throughput/{pool}", infMet.TPSThroughput)
+			r.Get("/queue-depth/{pool}", infMet.QueueDepthSeries)
+			r.Get("/gpu-util/{pool}", infMet.GPUUtilSeries)
+			r.Get("/kv-cache/{pool}", infMet.KVCacheSeries)
 		})
 
 		// Inference Diagnostics

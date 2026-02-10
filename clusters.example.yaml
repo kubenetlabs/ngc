@@ -1,0 +1,19 @@
+# Multi-cluster configuration for NGF Console.
+# Copy to clusters.yaml and adjust paths, then start with:
+#   cd api && go run ./cmd/server --clusters-config ../clusters.yaml
+
+clusters:
+  - name: production
+    displayName: "Production US-East"
+    kubeconfig: /path/to/prod-kubeconfig.yaml
+    default: true
+
+  - name: staging
+    displayName: "Staging EU-West"
+    kubeconfig: /path/to/staging-kubeconfig.yaml
+    context: staging-admin    # optional: use a specific context from the kubeconfig
+
+  # - name: dev
+  #   displayName: "Dev Local"
+  #   kubeconfig: ~/.kube/config
+  #   context: kind-ngf-dev

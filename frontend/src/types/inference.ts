@@ -92,3 +92,18 @@ export interface CostEstimate {
   dailyCost: number;
   monthlyCost: number;
 }
+
+export interface HistogramBucket {
+  rangeStart: number;
+  rangeEnd: number;
+  count: number;
+}
+
+export interface TimeseriesPoint {
+  timestamp: string;
+  value: number;
+}
+
+export interface InferencePoolWithGPU extends InferencePool {
+  avgGpuUtil: number;
+}
