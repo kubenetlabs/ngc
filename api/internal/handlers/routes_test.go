@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -203,6 +204,256 @@ func TestRouteHandler_Get(t *testing.T) {
 
 		if resp["error"] == "" {
 			t.Error("expected error message")
+		}
+	})
+}
+
+func TestRouteHandler_Create(t *testing.T) {
+	scheme := setupScheme(t)
+	handler := &RouteHandler{}
+
+	t.Run("successful create", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Post("/api/v1/httproutes", handler.Create)
+
+		body := `{
+			"name": "my-route",
+			"namespace": "default",
+			"parentRefs": [{"name": "my-gateway"}],
+			"rules": [
+				{
+					"matches": [{"path": {"type": "PathPrefix", "value": "/"}}],
+					"backendRefs": [{"name": "my-service", "port": 80}]
+				}
+			]
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/httproutes", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Errorf("expected status 201, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var resp HTTPRouteResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if resp.Name != "my-route" {
+			t.Errorf("expected name my-route, got %s", resp.Name)
+		}
+		if resp.Namespace != "default" {
+			t.Errorf("expected namespace default, got %s", resp.Namespace)
+		}
+		if len(resp.Rules) != 1 {
+			t.Fatalf("expected 1 rule, got %d", len(resp.Rules))
+		}
+	})
+
+	t.Run("missing required fields", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Post("/api/v1/httproutes", handler.Create)
+
+		body := `{"name": "my-route"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/httproutes", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Post("/api/v1/httproutes", handler.Create)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/httproutes", strings.NewReader("{invalid"))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected status 400, got %d", w.Code)
+		}
+	})
+}
+
+func TestRouteHandler_Update(t *testing.T) {
+	scheme := setupScheme(t)
+	handler := &RouteHandler{}
+
+	t.Run("successful update", func(t *testing.T) {
+		existing := &gatewayv1.HTTPRoute{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-route",
+				Namespace: "default",
+			},
+			Spec: gatewayv1.HTTPRouteSpec{
+				Rules: []gatewayv1.HTTPRouteRule{
+					{
+						BackendRefs: []gatewayv1.HTTPBackendRef{
+							{
+								BackendRef: gatewayv1.BackendRef{
+									BackendObjectReference: gatewayv1.BackendObjectReference{
+										Name: "old-service",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Put("/{namespace}/{name}", handler.Update)
+
+		body := `{
+			"parentRefs": [{"name": "my-gateway"}],
+			"rules": [
+				{
+					"matches": [{"path": {"type": "PathPrefix", "value": "/api"}}],
+					"backendRefs": [{"name": "new-service", "port": 8080}]
+				},
+				{
+					"matches": [{"path": {"type": "Exact", "value": "/health"}}],
+					"backendRefs": [{"name": "health-service", "port": 80}]
+				}
+			]
+		}`
+		req := httptest.NewRequest(http.MethodPut, "/default/test-route", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var resp HTTPRouteResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if len(resp.Rules) != 2 {
+			t.Errorf("expected 2 rules after update, got %d", len(resp.Rules))
+		}
+	})
+
+	t.Run("nonexistent route", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Put("/{namespace}/{name}", handler.Update)
+
+		body := `{
+			"parentRefs": [{"name": "my-gateway"}],
+			"rules": [{"backendRefs": [{"name": "svc", "port": 80}]}]
+		}`
+		req := httptest.NewRequest(http.MethodPut, "/default/nonexistent", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected status 404, got %d", w.Code)
+		}
+	})
+}
+
+func TestRouteHandler_Delete(t *testing.T) {
+	scheme := setupScheme(t)
+	handler := &RouteHandler{}
+
+	t.Run("successful delete", func(t *testing.T) {
+		existing := &gatewayv1.HTTPRoute{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-route",
+				Namespace: "default",
+			},
+			Spec: gatewayv1.HTTPRouteSpec{
+				Rules: []gatewayv1.HTTPRouteRule{
+					{
+						BackendRefs: []gatewayv1.HTTPBackendRef{
+							{
+								BackendRef: gatewayv1.BackendRef{
+									BackendObjectReference: gatewayv1.BackendObjectReference{
+										Name: "service-1",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Delete("/{namespace}/{name}", handler.Delete)
+
+		req := httptest.NewRequest(http.MethodDelete, "/default/test-route", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var resp map[string]string
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if resp["message"] != "httproute deleted" {
+			t.Errorf("expected 'httproute deleted' message, got %s", resp["message"])
+		}
+	})
+
+	t.Run("nonexistent route", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		k8sClient := kubernetes.NewForTest(fakeClient)
+
+		r := chi.NewRouter()
+		r.Use(contextMiddleware(k8sClient))
+		r.Delete("/{namespace}/{name}", handler.Delete)
+
+		req := httptest.NewRequest(http.MethodDelete, "/default/nonexistent", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 500, got %d", w.Code)
 		}
 	})
 }

@@ -1,4 +1,5 @@
 import type { Condition } from "./gateway";
+import { z } from "zod";
 
 export type RouteType = "HTTPRoute" | "GRPCRoute" | "TLSRoute" | "TCPRoute" | "UDPRoute";
 
@@ -55,3 +56,67 @@ export interface HTTPRoute {
   status?: { parents: { parentRef: ParentRef; controllerName: string; conditions: Condition[] }[] };
   createdAt: string;
 }
+
+// --- CRUD payload types ---
+
+export interface CreateHTTPRoutePayload {
+  name: string;
+  namespace: string;
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  hostnames?: string[];
+  rules: {
+    matches?: { path?: { type: string; value: string }; headers?: { type: string; name: string; value: string }[]; method?: string }[];
+    backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[];
+  }[];
+}
+
+export interface UpdateHTTPRoutePayload {
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  hostnames?: string[];
+  rules: {
+    matches?: { path?: { type: string; value: string }; headers?: { type: string; name: string; value: string }[]; method?: string }[];
+    backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[];
+  }[];
+}
+
+export const parentRefSchema = z.object({
+  name: z.string().min(1, "Gateway name is required"),
+  namespace: z.string().optional(),
+  sectionName: z.string().optional(),
+});
+
+export const pathMatchSchema = z.object({
+  type: z.enum(["Exact", "PathPrefix", "RegularExpression"]),
+  value: z.string().min(1, "Path value is required"),
+});
+
+export const backendRefSchema = z.object({
+  name: z.string().min(1, "Service name is required"),
+  namespace: z.string().optional(),
+  port: z.number().int().min(1).max(65535).optional(),
+  weight: z.number().int().min(0).optional(),
+});
+
+export const httpRouteMatchSchema = z.object({
+  path: pathMatchSchema.optional(),
+  method: z.string().optional(),
+});
+
+export const httpRouteRuleSchema = z.object({
+  matches: z.array(httpRouteMatchSchema).optional(),
+  backendRefs: z.array(backendRefSchema).min(1, "At least one backend ref is required"),
+});
+
+export const createHTTPRouteSchema = z.object({
+  name: z
+    .string()
+    .min(1, "Name is required")
+    .max(253)
+    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "Must be a valid Kubernetes name"),
+  namespace: z.string().min(1, "Namespace is required"),
+  parentRefs: z.array(parentRefSchema).min(1, "At least one parent gateway is required"),
+  hostnames: z.string().optional(),
+  rules: z.array(httpRouteRuleSchema).min(1, "At least one rule is required"),
+});
+
+export type CreateHTTPRouteFormData = z.infer<typeof createHTTPRouteSchema>;

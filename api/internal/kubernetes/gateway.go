@@ -101,3 +101,31 @@ func (c *Client) GetHTTPRoute(ctx context.Context, namespace, name string) (*gat
 	}
 	return &hr, nil
 }
+
+// CreateHTTPRoute creates a new HTTPRoute and returns the server-populated object.
+func (c *Client) CreateHTTPRoute(ctx context.Context, hr *gatewayv1.HTTPRoute) (*gatewayv1.HTTPRoute, error) {
+	if err := c.client.Create(ctx, hr); err != nil {
+		return nil, fmt.Errorf("creating httproute %s/%s: %w", hr.Namespace, hr.Name, err)
+	}
+	return hr, nil
+}
+
+// UpdateHTTPRoute updates an existing HTTPRoute and returns the server-populated object.
+func (c *Client) UpdateHTTPRoute(ctx context.Context, hr *gatewayv1.HTTPRoute) (*gatewayv1.HTTPRoute, error) {
+	if err := c.client.Update(ctx, hr); err != nil {
+		return nil, fmt.Errorf("updating httproute %s/%s: %w", hr.Namespace, hr.Name, err)
+	}
+	return hr, nil
+}
+
+// DeleteHTTPRoute deletes an HTTPRoute by namespace and name.
+func (c *Client) DeleteHTTPRoute(ctx context.Context, namespace, name string) error {
+	hr, err := c.GetHTTPRoute(ctx, namespace, name)
+	if err != nil {
+		return fmt.Errorf("fetching httproute for deletion %s/%s: %w", namespace, name, err)
+	}
+	if err := c.client.Delete(ctx, hr); err != nil {
+		return fmt.Errorf("deleting httproute %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}

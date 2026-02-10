@@ -1,16 +1,32 @@
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createHTTPRoute } from "@/api/routes";
+import { fetchHTTPRoute, updateHTTPRoute } from "@/api/routes";
 import { fetchGateways } from "@/api/gateways";
-import { createHTTPRouteSchema, type CreateHTTPRouteFormData, type CreateHTTPRoutePayload } from "@/types/route";
+import { httpRouteRuleSchema, parentRefSchema, type UpdateHTTPRoutePayload } from "@/types/route";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
+import { z } from "zod";
 
-export default function RouteCreate() {
+const updateHTTPRouteSchema = z.object({
+  parentRefs: z.array(parentRefSchema).min(1, "At least one parent gateway is required"),
+  hostnames: z.string().optional(),
+  rules: z.array(httpRouteRuleSchema).min(1, "At least one rule is required"),
+});
+
+type UpdateHTTPRouteFormData = z.infer<typeof updateHTTPRouteSchema>;
+
+export default function RouteEdit() {
+  const { ns, name } = useParams<{ ns: string; name: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activeCluster = useActiveCluster();
+
+  const { data: route, isLoading } = useQuery({
+    queryKey: ["httproute", activeCluster, ns, name],
+    queryFn: () => fetchHTTPRoute(ns!, name!),
+    enabled: !!ns && !!name,
+  });
 
   const { data: gateways } = useQuery({
     queryKey: ["gateways", activeCluster],
@@ -22,37 +38,46 @@ export default function RouteCreate() {
     control,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<CreateHTTPRouteFormData>({
-    resolver: zodResolver(createHTTPRouteSchema),
-    defaultValues: {
-      name: "",
-      namespace: "default",
-      parentRefs: [{ name: "", namespace: "", sectionName: "" }],
-      hostnames: "",
-      rules: [
-        {
-          matches: [{ path: { type: "PathPrefix", value: "/" }, method: "" }],
-          backendRefs: [{ name: "", port: 80, weight: 1, namespace: "" }],
-        },
-      ],
-    },
+  } = useForm<UpdateHTTPRouteFormData>({
+    resolver: zodResolver(updateHTTPRouteSchema),
+    values: route
+      ? {
+          parentRefs: route.parentRefs.map((p) => ({
+            name: p.name,
+            namespace: p.namespace ?? "",
+            sectionName: p.sectionName ?? "",
+          })),
+          hostnames: route.hostnames?.join(", ") ?? "",
+          rules: route.rules.map((rule) => ({
+            matches: rule.matches?.map((m) => ({
+              path: m.path ? { type: m.path.type, value: m.path.value } : undefined,
+              method: m.method ?? "",
+            })) ?? [{ path: { type: "PathPrefix" as const, value: "/" }, method: "" }],
+            backendRefs: rule.backendRefs?.map((br) => ({
+              name: br.name,
+              namespace: br.namespace ?? "",
+              port: br.port,
+              weight: br.weight,
+            })) ?? [{ name: "", port: 80, weight: 1, namespace: "" }],
+          })),
+        }
+      : undefined,
   });
 
   const { fields: parentRefFields, append: appendParentRef, remove: removeParentRef } = useFieldArray({ control, name: "parentRefs" });
   const { fields: ruleFields, append: appendRule, remove: removeRule } = useFieldArray({ control, name: "rules" });
 
   const mutation = useMutation({
-    mutationFn: createHTTPRoute,
+    mutationFn: (payload: UpdateHTTPRoutePayload) => updateHTTPRoute(ns!, name!, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["httproutes"] });
-      navigate("/routes");
+      queryClient.invalidateQueries({ queryKey: ["httproute", activeCluster, ns, name] });
+      navigate(`/routes/${ns}/${name}`);
     },
   });
 
-  const onSubmit = (data: CreateHTTPRouteFormData) => {
-    const payload: CreateHTTPRoutePayload = {
-      name: data.name,
-      namespace: data.namespace,
+  const onSubmit = (data: UpdateHTTPRouteFormData) => {
+    const payload: UpdateHTTPRoutePayload = {
       parentRefs: data.parentRefs.map((p) => ({
         name: p.name,
         namespace: p.namespace || undefined,
@@ -77,16 +102,19 @@ export default function RouteCreate() {
     mutation.mutate(payload);
   };
 
+  if (isLoading) return <p className="text-muted-foreground">Loading route...</p>;
+  if (!route) return <p className="text-muted-foreground">Route not found.</p>;
+
   return (
     <div>
       <div className="mb-6">
-        <Link to="/routes" className="text-sm text-blue-400 hover:underline">
-          &larr; Back to Routes
+        <Link to={`/routes/${ns}/${name}`} className="text-sm text-blue-400 hover:underline">
+          &larr; Back to {name}
         </Link>
       </div>
 
-      <h1 className="text-2xl font-bold">Create HTTPRoute</h1>
-      <p className="mt-1 text-muted-foreground">Create a new HTTPRoute resource.</p>
+      <h1 className="text-2xl font-bold">Edit HTTPRoute</h1>
+      <p className="mt-1 text-muted-foreground">{ns}/{name}</p>
 
       {mutation.isError && (
         <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
@@ -95,28 +123,16 @@ export default function RouteCreate() {
       )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 max-w-2xl space-y-6">
-        {/* Name */}
+        {/* Name (read-only) */}
         <div>
-          <label htmlFor="name" className="block text-sm font-medium">Name</label>
-          <input
-            id="name"
-            {...register("name")}
-            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="my-route"
-          />
-          {errors.name && <p className="mt-1 text-xs text-red-400">{errors.name.message}</p>}
+          <label className="block text-sm font-medium">Name</label>
+          <p className="mt-1 font-mono text-sm text-muted-foreground">{name}</p>
         </div>
 
-        {/* Namespace */}
+        {/* Namespace (read-only) */}
         <div>
-          <label htmlFor="namespace" className="block text-sm font-medium">Namespace</label>
-          <input
-            id="namespace"
-            {...register("namespace")}
-            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="default"
-          />
-          {errors.namespace && <p className="mt-1 text-xs text-red-400">{errors.namespace.message}</p>}
+          <label className="block text-sm font-medium">Namespace</label>
+          <p className="mt-1 font-mono text-sm text-muted-foreground">{ns}</p>
         </div>
 
         {/* Parent Refs */}
@@ -226,10 +242,10 @@ export default function RouteCreate() {
             disabled={isSubmitting || mutation.isPending}
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {mutation.isPending ? "Creating..." : "Create HTTPRoute"}
+            {mutation.isPending ? "Saving..." : "Save Changes"}
           </button>
           <Link
-            to="/routes"
+            to={`/routes/${ns}/${name}`}
             className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/30"
           >
             Cancel

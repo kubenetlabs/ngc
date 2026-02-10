@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { fetchHTTPRoutes } from "@/api/routes";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
@@ -31,7 +31,7 @@ export default function RouteList() {
           <h1 className="text-2xl font-bold">Routes</h1>
           <p className="mt-1 text-muted-foreground">Manage HTTP, gRPC, TLS, TCP, and UDP routes.</p>
         </div>
-        <div>
+        <div className="flex items-center gap-3">
           <input
             type="text"
             placeholder="Filter by namespace..."
@@ -43,6 +43,12 @@ export default function RouteList() {
             }}
             className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
+          <Link
+            to="/routes/create/HTTPRoute"
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Create Route
+          </Link>
         </div>
       </div>
 
@@ -70,7 +76,11 @@ export default function RouteList() {
             <tbody>
               {routes.map((route) => (
                 <tr key={`${route.namespace}/${route.name}`} className="border-b border-border last:border-0 hover:bg-muted/20">
-                  <td className="px-4 py-3 font-medium text-foreground">{route.name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    <Link to={`/routes/${route.namespace}/${route.name}`} className="text-blue-400 hover:underline">
+                      {route.name}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">{route.namespace}</td>
                   <td className="px-4 py-3 font-mono text-muted-foreground">
                     {route.hostnames?.join(", ") || "*"}

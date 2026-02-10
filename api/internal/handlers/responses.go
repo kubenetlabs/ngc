@@ -476,6 +476,156 @@ func applyUpdateToGateway(gw *gatewayv1.Gateway, req UpdateGatewayRequest) {
 	}
 }
 
+// Request types for HTTPRoute CRUD
+
+type CreateHTTPRouteRequest struct {
+	Name       string              `json:"name"`
+	Namespace  string              `json:"namespace"`
+	ParentRefs []ParentRefRequest  `json:"parentRefs"`
+	Hostnames  []string            `json:"hostnames,omitempty"`
+	Rules      []HTTPRouteRuleReq  `json:"rules"`
+}
+
+type UpdateHTTPRouteRequest struct {
+	ParentRefs []ParentRefRequest  `json:"parentRefs"`
+	Hostnames  []string            `json:"hostnames,omitempty"`
+	Rules      []HTTPRouteRuleReq  `json:"rules"`
+}
+
+type ParentRefRequest struct {
+	Name        string  `json:"name"`
+	Namespace   *string `json:"namespace,omitempty"`
+	SectionName *string `json:"sectionName,omitempty"`
+}
+
+type HTTPRouteRuleReq struct {
+	Matches     []HTTPRouteMatchRequest `json:"matches,omitempty"`
+	BackendRefs []BackendRefRequest     `json:"backendRefs,omitempty"`
+}
+
+type HTTPRouteMatchRequest struct {
+	Path    *PathMatchRequest    `json:"path,omitempty"`
+	Headers []HeaderMatchRequest `json:"headers,omitempty"`
+	Method  *string              `json:"method,omitempty"`
+}
+
+type PathMatchRequest struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+type HeaderMatchRequest struct {
+	Type  string `json:"type"`
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type BackendRefRequest struct {
+	Name      string  `json:"name"`
+	Namespace *string `json:"namespace,omitempty"`
+	Port      *int32  `json:"port,omitempty"`
+	Weight    *int32  `json:"weight,omitempty"`
+}
+
+func toHTTPRouteObject(req CreateHTTPRouteRequest) *gatewayv1.HTTPRoute {
+	hr := &gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      req.Name,
+			Namespace: req.Namespace,
+		},
+		Spec: gatewayv1.HTTPRouteSpec{},
+	}
+	hr.Spec.ParentRefs = convertParentRefRequests(req.ParentRefs)
+	for _, h := range req.Hostnames {
+		hr.Spec.Hostnames = append(hr.Spec.Hostnames, gatewayv1.Hostname(h))
+	}
+	hr.Spec.Rules = convertHTTPRouteRuleRequests(req.Rules)
+	return hr
+}
+
+func applyUpdateToHTTPRoute(hr *gatewayv1.HTTPRoute, req UpdateHTTPRouteRequest) {
+	hr.Spec.ParentRefs = convertParentRefRequests(req.ParentRefs)
+	hr.Spec.Hostnames = nil
+	for _, h := range req.Hostnames {
+		hr.Spec.Hostnames = append(hr.Spec.Hostnames, gatewayv1.Hostname(h))
+	}
+	hr.Spec.Rules = convertHTTPRouteRuleRequests(req.Rules)
+}
+
+func convertParentRefRequests(refs []ParentRefRequest) []gatewayv1.ParentReference {
+	group := gatewayv1.Group("gateway.networking.k8s.io")
+	kind := gatewayv1.Kind("Gateway")
+	result := make([]gatewayv1.ParentReference, 0, len(refs))
+	for _, r := range refs {
+		pr := gatewayv1.ParentReference{
+			Group: &group,
+			Kind:  &kind,
+			Name:  gatewayv1.ObjectName(r.Name),
+		}
+		if r.Namespace != nil {
+			ns := gatewayv1.Namespace(*r.Namespace)
+			pr.Namespace = &ns
+		}
+		if r.SectionName != nil {
+			sn := gatewayv1.SectionName(*r.SectionName)
+			pr.SectionName = &sn
+		}
+		result = append(result, pr)
+	}
+	return result
+}
+
+func convertHTTPRouteRuleRequests(rules []HTTPRouteRuleReq) []gatewayv1.HTTPRouteRule {
+	result := make([]gatewayv1.HTTPRouteRule, 0, len(rules))
+	for _, rule := range rules {
+		r := gatewayv1.HTTPRouteRule{}
+		for _, m := range rule.Matches {
+			match := gatewayv1.HTTPRouteMatch{}
+			if m.Path != nil {
+				pathType := gatewayv1.PathMatchType(m.Path.Type)
+				match.Path = &gatewayv1.HTTPPathMatch{
+					Type:  &pathType,
+					Value: &m.Path.Value,
+				}
+			}
+			if m.Method != nil {
+				method := gatewayv1.HTTPMethod(*m.Method)
+				match.Method = &method
+			}
+			for _, h := range m.Headers {
+				headerType := gatewayv1.HeaderMatchType(h.Type)
+				match.Headers = append(match.Headers, gatewayv1.HTTPHeaderMatch{
+					Type:  &headerType,
+					Name:  gatewayv1.HTTPHeaderName(h.Name),
+					Value: h.Value,
+				})
+			}
+			r.Matches = append(r.Matches, match)
+		}
+		for _, br := range rule.BackendRefs {
+			backendRef := gatewayv1.HTTPBackendRef{
+				BackendRef: gatewayv1.BackendRef{
+					BackendObjectReference: gatewayv1.BackendObjectReference{
+						Name: gatewayv1.ObjectName(br.Name),
+					},
+					Weight: br.Weight,
+				},
+			}
+			if br.Namespace != nil {
+				ns := gatewayv1.Namespace(*br.Namespace)
+				backendRef.BackendRef.Namespace = &ns
+			}
+			if br.Port != nil {
+				port := gatewayv1.PortNumber(*br.Port)
+				backendRef.BackendRef.Port = &port
+			}
+			r.BackendRefs = append(r.BackendRefs, backendRef)
+		}
+		result = append(result, r)
+	}
+	return result
+}
+
 // Shared response helpers
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

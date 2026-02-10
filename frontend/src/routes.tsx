@@ -13,6 +13,8 @@ const InferencePoolCreate = lazy(() => import("@/pages/InferencePoolCreate"));
 const InferencePoolDetail = lazy(() => import("@/pages/InferencePoolDetail"));
 const RouteList = lazy(() => import("@/pages/RouteList"));
 const RouteCreate = lazy(() => import("@/pages/RouteCreate"));
+const RouteDetail = lazy(() => import("@/pages/RouteDetail"));
+const RouteEdit = lazy(() => import("@/pages/RouteEdit"));
 const PolicyList = lazy(() => import("@/pages/PolicyList"));
 const PolicyCreate = lazy(() => import("@/pages/PolicyCreate"));
 const CertificateList = lazy(() => import("@/pages/CertificateList"));
@@ -42,6 +44,8 @@ export const routes: RouteObject[] = [
       { path: "inference/pools/:ns/:name", element: <InferencePoolDetail /> },
       { path: "routes", element: <RouteList /> },
       { path: "routes/create/:type", element: <RouteCreate /> },
+      { path: "routes/:ns/:name", element: <RouteDetail /> },
+      { path: "routes/:ns/:name/edit", element: <RouteEdit /> },
       { path: "policies", element: <PolicyList /> },
       { path: "policies/create/:type", element: <PolicyCreate /> },
       { path: "certificates", element: <CertificateList /> },
