@@ -21,6 +21,12 @@ import (
 type Client struct {
 	client        client.Client
 	dynamicClient dynamic.Interface
+	restConfig    *rest.Config
+}
+
+// RestConfig returns the underlying REST configuration.
+func (c *Client) RestConfig() *rest.Config {
+	return c.restConfig
 }
 
 // DynamicClient returns the dynamic Kubernetes client for unstructured access.
@@ -59,7 +65,7 @@ func New(kubeconfig string) (*Client, error) {
 	}
 
 	slog.Info("kubernetes client initialized", "host", cfg.Host)
-	return &Client{client: c, dynamicClient: dc}, nil
+	return &Client{client: c, dynamicClient: dc, restConfig: cfg}, nil
 }
 
 // NewFromContext creates a new Kubernetes client using the specified kubeconfig path
@@ -99,7 +105,7 @@ func NewFromContext(kubeconfigPath, contextName string) (*Client, error) {
 	}
 
 	slog.Info("kubernetes client initialized", "host", cfg.Host, "context", contextName)
-	return &Client{client: c, dynamicClient: dc}, nil
+	return &Client{client: c, dynamicClient: dc, restConfig: cfg}, nil
 }
 
 // NewFromRestConfig creates a new Kubernetes client from an existing rest.Config.
@@ -127,7 +133,7 @@ func NewFromRestConfig(cfg *rest.Config) (*Client, error) {
 	}
 
 	slog.Info("kubernetes client initialized", "host", cfg.Host)
-	return &Client{client: c, dynamicClient: dc}, nil
+	return &Client{client: c, dynamicClient: dc, restConfig: cfg}, nil
 }
 
 func resolveConfig(kubeconfig string) (*rest.Config, error) {
