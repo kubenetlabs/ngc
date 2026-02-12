@@ -34,6 +34,13 @@ spec:
             - "--db-type=clickhouse"
             - "--clickhouse-url={{ include "ngf-console.fullname" . }}-clickhouse:9000"
             {{- end }}
+            {{- if .Values.multiCluster.enabled }}
+            - "--multicluster"
+            - "--multicluster-namespace={{ .Release.Namespace }}"
+            {{- if .Values.multiCluster.hubClusterName }}
+            - "--multicluster-default={{ .Values.multiCluster.hubClusterName }}"
+            {{- end }}
+            {{- end }}
           volumeMounts:
             - name: data
               mountPath: /data

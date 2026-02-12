@@ -18,13 +18,13 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # NGF Console CRDs
   - apiGroups: ["ngf-console.f5.com"]
-    resources: ["inferencestacks", "gatewaybundles", "distributedcloudpublishes"]
+    resources: ["inferencestacks", "gatewaybundles", "distributedcloudpublishes", "managedclusters"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["ngf-console.f5.com"]
-    resources: ["inferencestacks/status", "gatewaybundles/status", "distributedcloudpublishes/status"]
+    resources: ["inferencestacks/status", "gatewaybundles/status", "distributedcloudpublishes/status", "managedclusters/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: ["ngf-console.f5.com"]
-    resources: ["inferencestacks/finalizers", "gatewaybundles/finalizers", "distributedcloudpublishes/finalizers"]
+    resources: ["inferencestacks/finalizers", "gatewaybundles/finalizers", "distributedcloudpublishes/finalizers", "managedclusters/finalizers"]
     verbs: ["update"]
   # Core resources
   - apiGroups: [""]
