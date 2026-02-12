@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,7 +19,13 @@ type SQLiteStore struct {
 }
 
 // NewSQLite opens or creates a SQLite database at the given path.
+// It automatically creates the parent directory if it doesn't exist.
 func NewSQLite(path string) (*SQLiteStore, error) {
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return nil, fmt.Errorf("create database directory %s: %w", dir, err)
+		}
+	}
 	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
