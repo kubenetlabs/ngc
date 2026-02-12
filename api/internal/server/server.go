@@ -15,6 +15,7 @@ import (
 	"github.com/kubenetlabs/ngc/api/internal/database"
 	"github.com/kubenetlabs/ngc/api/internal/handlers"
 	"github.com/kubenetlabs/ngc/api/internal/inference"
+	mc "github.com/kubenetlabs/ngc/api/internal/multicluster"
 	prom "github.com/kubenetlabs/ngc/api/internal/prometheus"
 )
 
@@ -27,12 +28,13 @@ func writeNotImpl(w http.ResponseWriter) {
 
 // Config holds server dependencies.
 type Config struct {
-	ClusterManager  *cluster.Manager
+	ClusterManager  cluster.Provider
 	MetricsProvider inference.MetricsProvider
 	Store           database.Store
 	PromClient      *prom.Client
 	CHClient        *ch.Client
 	Webhooks        []alerting.WebhookConfig
+	Pool            *mc.ClientPool // non-nil when using CRD-based multi-cluster
 }
 
 // Server is the main HTTP server for the NGF Console API.
@@ -79,7 +81,7 @@ func (s *Server) registerRoutes() {
 	gw := &handlers.GatewayHandler{}
 	rt := &handlers.RouteHandler{}
 	cfgHandler := &handlers.ConfigHandler{}
-	clusterHandler := &handlers.ClusterHandler{Manager: s.Config.ClusterManager}
+	clusterHandler := &handlers.ClusterHandler{Manager: s.Config.ClusterManager, Pool: s.Config.Pool}
 	pol := &handlers.PolicyHandler{}
 	cert := &handlers.CertificateHandler{}
 	met := &handlers.MetricsHandler{Prom: s.Config.PromClient}
@@ -97,17 +99,38 @@ func (s *Server) registerRoutes() {
 	aud := &handlers.AuditHandler{Store: s.Config.Store}
 	alert := &handlers.AlertHandler{Store: s.Config.Store, Evaluator: s.Evaluator}
 
+	globalHandler := &handlers.GlobalHandler{Pool: s.Config.Pool, Manager: s.Config.ClusterManager}
+
 	// Health check endpoint (outside /api/v1 for simplicity with probes)
 	s.Router.Get("/api/v1/health", handlers.HealthCheck)
 
 	s.Router.Route("/api/v1", func(r chi.Router) {
-		// Cluster management (no cluster middleware needed)
+		// Cluster management (hub-level, no cluster middleware)
 		r.Get("/clusters", clusterHandler.List)
+		r.Post("/clusters", clusterHandler.Register)
+		r.Get("/clusters/summary", clusterHandler.Summary)
 
-		// Cluster-scoped routes (new multi-cluster paths)
+		// Global cross-cluster aggregation endpoints
+		r.Route("/global", func(r chi.Router) {
+			r.Get("/gateways", globalHandler.Gateways)
+			r.Get("/routes", globalHandler.Routes)
+			r.Get("/gpu-capacity", globalHandler.GPUCapacity)
+		})
+
+		// Cluster-specific management + resource routes
 		r.Route("/clusters/{cluster}", func(r chi.Router) {
-			r.Use(ClusterResolver(s.Config.ClusterManager))
-			s.mountResourceRoutes(r, gw, rt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, infStack, gwBundle, coex, xc, mig, aud, alert)
+			// Management endpoints (matched by specific sub-paths first)
+			r.Get("/detail", clusterHandler.Get)
+			r.Delete("/", clusterHandler.Unregister)
+			r.Post("/test", clusterHandler.TestConnection)
+			r.Post("/install-agent", clusterHandler.InstallAgent)
+			r.Post("/heartbeat", clusterHandler.Heartbeat)
+
+			// Cluster-scoped resource routes
+			r.Group(func(r chi.Router) {
+				r.Use(ClusterResolver(s.Config.ClusterManager))
+				s.mountResourceRoutes(r, gw, rt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, infStack, gwBundle, coex, xc, mig, aud, alert)
+			})
 		})
 
 		// Legacy routes (backward compat — uses default cluster)

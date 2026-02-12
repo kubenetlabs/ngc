@@ -7,9 +7,9 @@ Web-based management platform for [NGINX Gateway Fabric](https://github.com/ngin
 - **Gateway Management** -- CRUD for Gateways, HTTPRoutes via GatewayBundle CRDs with operator-driven reconciliation
 - **Inference Observability** -- Real-time GPU metrics, EPP decision visualization, per-pod KV-cache and queue depth monitoring, TTFT histograms, cost estimation
 - **Operator-Driven Architecture** -- Declarative CRDs (InferenceStack, GatewayBundle) with drift detection, self-healing, and status aggregation
-- **Multi-Cluster** -- Manage multiple Kubernetes clusters from a single console
+- **Multi-Cluster** -- Hub-spoke architecture with CRD-based cluster registration, per-cluster agents, global cross-cluster views, and circuit-breaker health checking
 - **Migration Tooling** -- Import NGINX configs, Ingress, and VirtualServer resources; analyze, generate, and apply Gateway API equivalents
-- **Observability Stack** -- ClickHouse analytics, Prometheus RED metrics, OpenTelemetry collection, log exploration
+- **Observability Stack** -- ClickHouse analytics with per-cluster telemetry, Prometheus RED metrics, OpenTelemetry collection, log exploration
 - **Alerting** -- Configurable alert rules with webhook notifications for cert expiry, error rates, and GPU saturation
 - **WebSocket Streaming** -- Live EPP decision feed, GPU metrics updates, scaling events
 - **F5 Distributed Cloud** -- Publish routes and inference endpoints to F5 XC (Enterprise)
@@ -17,35 +17,40 @@ Web-based management platform for [NGINX Gateway Fabric](https://github.com/ngin
 ## Architecture
 
 ```
-                    +------------------+
-                    |    Browser       |
-                    |  React + Vite    |
-                    +--------+---------+
-                             |
-                             v
-                    +------------------+
-                    |  Go API Server   |
-                    |  (Chi Router)    |
-                    +--+--+--+--+--+--+
-                       |  |  |  |  |
-          +------------+  |  |  |  +----------+
-          |               |  |  |             |
-          v               v  |  v             v
-  +-------+------+  +----++ |+-+-----+  +----+--------+
-  |  Kubernetes   |  |Prom| || Config |  |  WebSocket  |
-  |  (client-go)  |  |    | || DB     |  |  Hub        |
-  +-------+------+  +----++ |+--------+  +-------------+
-          |               |  |
-          v               v  v
-  +-------+------+  +----+--+-----+
-  | K8s Clusters  |  | ClickHouse  |
-  | + Operator    |  | + OTel      |
-  +--------------++  +-------------+
-                 |
-          +------+------+
-          |  Operator    |
-          |  (CRDs)      |
-          +-------------+
+                          +-----------------+
+                          |    Browser      |
+                          |  React + Vite   |
+                          +-------+---------+
+                                  |
+                                  v
+                 +-------------------------------+
+                 |        Hub Cluster            |
+                 |  +-------------------------+  |
+                 |  |  Go API Server (Chi)    |  |
+                 |  |  + WebSocket Hub        |  |
+                 |  +--+--+--+--+--+--+------+  |
+                 |     |  |  |  |  |  |         |
+                 |     v  v  |  v  v  v         |
+                 |  K8s Prom |  DB  CH OTel     |
+                 |           |                  |
+                 |  +--------+----------+       |
+                 |  | ManagedCluster    |       |
+                 |  | CRDs + Operator   |       |
+                 |  +-------------------+       |
+                 +------+-------------+---------+
+                        |             |
+              +---------+             +---------+
+              v                                 v
+   +---------------------+          +---------------------+
+   |  Workload Cluster A |          |  Workload Cluster B |
+   |  +---------------+  |          |  +---------------+  |
+   |  | Agent:        |  |          |  | Agent:        |  |
+   |  |  Operator     |  |          |  |  Operator     |  |
+   |  |  Heartbeat    |  |          |  |  Heartbeat    |  |
+   |  |  OTel Fwd     |  |          |  |  OTel Fwd     |  |
+   |  +---------------+  |          |  +---------------+  |
+   |  + NGF + Workloads  |          |  + NGF + Workloads  |
+   +---------------------+          +---------------------+
 ```
 
 **Components:**
@@ -57,6 +62,7 @@ Web-based management platform for [NGINX Gateway Fabric](https://github.com/ngin
 | Operator | `operator/` | controller-runtime, reconciles InferenceStack and GatewayBundle CRDs |
 | Controller | `controller/` | Route watcher, XC publish controller |
 | Migration CLI | `migration-cli/` | Cobra CLI for KIC-to-NGF migration |
+| Agent Chart | `charts/ngf-console-agent/` | Helm chart for workload cluster agents (operator, heartbeat, OTel forwarder) |
 
 ## Container Images
 
@@ -67,15 +73,17 @@ Pre-built container images are available on Docker Hub:
 | API | `danny2guns/ngf-console-api:0.1.0` | Go API server |
 | Frontend | `danny2guns/ngf-console-frontend:0.1.0` | Nginx serving React build |
 | Operator | `danny2guns/ngf-console-operator:0.1.0` | CRD operator (controller-runtime) |
+| Agent Heartbeat | `danny2guns/ngf-console-agent-heartbeat:0.1.0` | Heartbeat reporter for workload clusters |
 
 ```bash
 # Pull all images
 docker pull danny2guns/ngf-console-api:0.1.0
 docker pull danny2guns/ngf-console-frontend:0.1.0
 docker pull danny2guns/ngf-console-operator:0.1.0
+docker pull danny2guns/ngf-console-agent-heartbeat:0.1.0
 ```
 
-These are the default images in the Helm chart. No `--set` overrides needed for a standard install.
+These are the default images in the Helm charts. No `--set` overrides needed for a standard install.
 
 ## Prerequisites
 
@@ -202,9 +210,43 @@ See [`docs/installation.md`](docs/installation.md) for full installation instruc
 
 ## Multi-Cluster
 
-Create a `clusters.yaml` file:
+NGF Console supports two multi-cluster modes:
+
+### CRD-based (recommended for production)
+
+Uses `ManagedCluster` custom resources on the hub cluster to register and manage workload clusters. Each workload cluster runs a lightweight agent (heartbeat reporter + OTel forwarder).
+
+```bash
+# 1. Enable CRD-based multi-cluster on the hub API server
+cd api && go run ./cmd/server --multicluster --multicluster-namespace ngf-system
+
+# 2. Register a workload cluster via the API
+curl -X POST http://localhost:8080/api/v1/clusters \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "workload-west",
+    "displayName": "Workload US-West-2",
+    "region": "us-west-2",
+    "environment": "production",
+    "kubeconfig": "<base64-encoded-kubeconfig>"
+  }'
+
+# 3. Install the agent on the workload cluster
+helm install ngf-console-agent charts/ngf-console-agent \
+  --namespace ngf-system --create-namespace \
+  --set cluster.name=workload-west \
+  --set hub.apiEndpoint=https://hub.example.com \
+  --set hub.otelEndpoint=hub.example.com:4317
+```
+
+The agent sends heartbeats every 30 seconds. The hub tracks cluster health with per-cluster circuit breakers and exposes global aggregation endpoints for cross-cluster views.
+
+### File-based (lightweight, for development)
+
+Uses a static YAML configuration file:
 
 ```yaml
+# clusters.yaml
 clusters:
   - name: production
     displayName: "Production US-East"
@@ -215,13 +257,13 @@ clusters:
     kubeconfig: /path/to/staging-kubeconfig.yaml
 ```
 
-Start with:
-
 ```bash
 cd api && go run ./cmd/server --clusters-config clusters.yaml
 ```
 
-The frontend cluster switcher routes API requests to the selected cluster. Both cluster-scoped (`/api/v1/clusters/{name}/...`) and legacy (`/api/v1/...`) routes are supported.
+The frontend cluster selector routes API requests to the selected cluster. Both cluster-scoped (`/api/v1/clusters/{name}/...`) and legacy (`/api/v1/...`) routes are supported. An "All Clusters" mode provides cross-cluster aggregation views.
+
+See [`docs/installation.md`](docs/installation.md#multi-cluster-setup) for detailed multi-cluster setup instructions.
 
 ## Project Structure
 
@@ -234,7 +276,8 @@ ngc/
       inference/                # MetricsProvider interface + mock
       clickhouse/               # ClickHouse provider implementation
       prometheus/               # Prometheus RED metrics client
-      cluster/                  # Multi-cluster manager
+      cluster/                  # File-based multi-cluster manager
+      multicluster/             # CRD-based multi-cluster (ClientPool, health checker, circuit breaker)
       kubernetes/               # K8s client wrapper
       database/                 # SQLite/PostgreSQL config store
       alerting/                 # Alert evaluation engine + webhooks
@@ -248,7 +291,7 @@ ngc/
       components/               # Shared UI components
       pages/                    # 26 page components
       types/                    # TypeScript interfaces
-      store/                    # Zustand state stores
+      store/                    # Zustand state stores (cluster, settings)
       hooks/                    # Custom React hooks (WebSocket, etc.)
   operator/                     # Kubernetes operator (controller-runtime)
     api/v1alpha1/               # CRD type definitions
@@ -258,9 +301,13 @@ ngc/
   controller/                   # Route watcher + XC publish controller
   migration-cli/                # KIC migration CLI (cobra)
     cmd/                        # scan, plan, apply, validate commands
+  charts/
+    ngf-console-agent/          # Agent Helm chart for workload clusters
+      templates/                # Operator, heartbeat, OTel deployments + RBAC
+      values.yaml               # Agent configuration values
   deploy/
     docker-compose/             # Dev environment (ClickHouse, OTel)
-    helm/ngf-console/           # Production Helm chart
+    helm/ngf-console/           # Hub Helm chart
     k8s/                        # Standalone CRD manifests
     manifests/                  # Generated install manifests
   docs/                         # Documentation
@@ -268,7 +315,26 @@ ngc/
 
 ## Custom Resource Definitions
 
-The operator manages two primary CRDs:
+The operator manages two primary CRDs, and the multi-cluster system uses a third:
+
+### ManagedCluster
+
+Represents a registered Kubernetes cluster in the hub. Used by the CRD-based multi-cluster system.
+
+```yaml
+apiVersion: ngf-console.f5.com/v1alpha1
+kind: ManagedCluster
+metadata:
+  name: workload-west
+  namespace: ngf-system
+spec:
+  displayName: "Workload US-West-2"
+  region: us-west-2
+  environment: production
+  kubeconfigSecretRef:
+    name: workload-west-kubeconfig
+  ngfEdition: enterprise
+```
 
 ### InferenceStack
 
@@ -313,13 +379,22 @@ spec:
 |------|---------|-------------|
 | `--port` | `8080` | HTTP server listen port |
 | `--kubeconfig` | auto | Path to kubeconfig file |
-| `--clusters-config` | (none) | Path to multi-cluster YAML config |
+| `--clusters-config` | (none) | Path to multi-cluster YAML config (file-based mode) |
+| `--multicluster` | `false` | Enable CRD-based multi-cluster mode (reads ManagedCluster CRDs) |
+| `--multicluster-namespace` | `ngf-system` | Namespace for ManagedCluster CRDs |
+| `--multicluster-default` | (auto) | Default cluster name in multi-cluster mode |
 | `--db-type` | `mock` | Metrics provider: `mock` or `clickhouse` |
 | `--clickhouse-url` | `localhost:9000` | ClickHouse connection URL |
 | `--prometheus-url` | (none) | Prometheus server URL for RED metrics |
 | `--config-db` | `ngf-console.db` | Path to SQLite config database |
 | `--alert-webhooks` | (none) | Comma-separated webhook URLs for alert notifications |
 | `--version` | | Print version and exit |
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated list of allowed CORS origins. Set to specific origins in production |
 
 ## Build & Test
 
@@ -345,10 +420,10 @@ cd migration-cli && go build ./...
 
 | Document | Description |
 |----------|-------------|
-| [Installation Guide](docs/installation.md) | Step-by-step installation for dev, Docker Compose, and Kubernetes |
-| [Configuration Reference](docs/configuration.md) | All API flags, Helm values, environment variables, and CRD specs |
-| [Architecture](docs/architecture.md) | System design, data flows, and component interactions |
+| [Installation Guide](docs/installation.md) | Step-by-step installation for dev, Docker Compose, Kubernetes, and multi-cluster |
+| [Configuration Reference](docs/configuration.md) | All API flags, Helm values, environment variables, agent chart values, and CRD specs |
+| [Architecture](docs/architecture.md) | System design, hub-spoke multi-cluster, data flows, and component interactions |
 | [Development Guide](docs/development.md) | Local setup, coding conventions, and contribution workflow |
-| [API Reference](docs/api-reference.md) | Complete REST API endpoint documentation |
+| [API Reference](docs/api-reference.md) | Complete REST API endpoint documentation including cluster management and global aggregation |
 | [Migration Guide](docs/migration-guide.md) | Migrating from NGINX Ingress Controller to Gateway API |
 | [XC Integration](docs/xc-integration.md) | F5 Distributed Cloud publishing and metrics |

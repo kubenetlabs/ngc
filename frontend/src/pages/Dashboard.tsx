@@ -21,6 +21,8 @@ import { fetchAuditEntries } from "@/api/audit";
 import { TopologyGraph } from "@/components/topology/TopologyGraph";
 import { useEdition } from "@/hooks/useEdition";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
+import { ALL_CLUSTERS } from "@/store/clusterStore";
+import { GlobalDashboard } from "@/components/global/GlobalDashboard";
 import type { Gateway } from "@/types/gateway";
 
 function SummaryCard({
@@ -306,7 +308,7 @@ function RecentActivityFeed() {
   );
 }
 
-export default function Dashboard() {
+function SingleClusterDashboard() {
   const { edition } = useEdition();
   const activeCluster = useActiveCluster();
 
@@ -421,4 +423,14 @@ export default function Dashboard() {
       )}
     </div>
   );
+}
+
+export default function Dashboard() {
+  const activeCluster = useActiveCluster();
+
+  if (activeCluster === ALL_CLUSTERS) {
+    return <GlobalDashboard />;
+  }
+
+  return <SingleClusterDashboard />;
 }

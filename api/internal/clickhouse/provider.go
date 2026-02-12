@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
 	"github.com/kubenetlabs/ngc/api/internal/inference"
 )
 
@@ -29,8 +30,15 @@ func NewProvider(client *Client) *Provider {
 	return &Provider{client: client}
 }
 
+// clusterFilter extracts the cluster name from context for ClickHouse filtering.
+// Returns "" when no cluster is specified (matches all clusters).
+func clusterFilter(ctx context.Context) string {
+	return cluster.ClusterNameFromContext(ctx)
+}
+
 func (p *Provider) ListPools(ctx context.Context) ([]inference.PoolStatus, error) {
-	rows, err := p.client.Conn().Query(ctx, queryListPools)
+	cn := clusterFilter(ctx)
+	rows, err := p.client.Conn().Query(ctx, queryListPools, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("ListPools query: %w", err)
 	}
@@ -56,7 +64,8 @@ func (p *Provider) ListPools(ctx context.Context) ([]inference.PoolStatus, error
 }
 
 func (p *Provider) GetPool(ctx context.Context, name string) (*inference.PoolStatus, error) {
-	rows, err := p.client.Conn().Query(ctx, queryGetPool, name)
+	cn := clusterFilter(ctx)
+	rows, err := p.client.Conn().Query(ctx, queryGetPool, name, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("GetPool query: %w", err)
 	}
@@ -82,7 +91,8 @@ func (p *Provider) GetPool(ctx context.Context, name string) (*inference.PoolSta
 }
 
 func (p *Provider) GetMetricsSummary(ctx context.Context, pool string) (*inference.MetricsSummary, error) {
-	rows, err := p.client.Conn().Query(ctx, queryMetricsSummary, pool, pool)
+	cn := clusterFilter(ctx)
+	rows, err := p.client.Conn().Query(ctx, queryMetricsSummary, pool, pool, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("GetMetricsSummary query: %w", err)
 	}
@@ -108,7 +118,8 @@ func (p *Provider) GetMetricsSummary(ctx context.Context, pool string) (*inferen
 }
 
 func (p *Provider) GetPodMetrics(ctx context.Context, pool string) ([]inference.PodMetrics, error) {
-	rows, err := p.client.Conn().Query(ctx, queryPodMetrics, pool)
+	cn := clusterFilter(ctx)
+	rows, err := p.client.Conn().Query(ctx, queryPodMetrics, pool, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("GetPodMetrics query: %w", err)
 	}
@@ -134,7 +145,8 @@ func (p *Provider) GetPodMetrics(ctx context.Context, pool string) ([]inference.
 }
 
 func (p *Provider) GetRecentEPPDecisions(ctx context.Context, pool string, limit int) ([]inference.EPPDecision, error) {
-	rows, err := p.client.Conn().Query(ctx, queryRecentEPPDecisions, pool, limit)
+	cn := clusterFilter(ctx)
+	rows, err := p.client.Conn().Query(ctx, queryRecentEPPDecisions, pool, cn, cn, limit)
 	if err != nil {
 		return nil, fmt.Errorf("GetRecentEPPDecisions query: %w", err)
 	}
@@ -159,7 +171,8 @@ func (p *Provider) GetRecentEPPDecisions(ctx context.Context, pool string, limit
 }
 
 func (p *Provider) GetTTFTHistogram(ctx context.Context, pool string) ([]inference.HistogramBucket, error) {
-	rows, err := p.client.Conn().Query(ctx, queryTTFTHistogram, pool)
+	cn := clusterFilter(ctx)
+	rows, err := p.client.Conn().Query(ctx, queryTTFTHistogram, pool, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("GetTTFTHistogram query: %w", err)
 	}
@@ -180,24 +193,28 @@ func (p *Provider) GetTTFTHistogram(ctx context.Context, pool string) ([]inferen
 }
 
 func (p *Provider) GetTPSThroughput(ctx context.Context, pool string) ([]inference.TimeseriesPoint, error) {
-	return p.queryTimeseries(ctx, queryTPSThroughput, pool, "GetTPSThroughput")
+	cn := clusterFilter(ctx)
+	return p.queryTimeseries(ctx, queryTPSThroughput, pool, cn, "GetTPSThroughput")
 }
 
 func (p *Provider) GetQueueDepthSeries(ctx context.Context, pool string) ([]inference.TimeseriesPoint, error) {
-	return p.queryTimeseries(ctx, queryQueueDepthSeries, pool, "GetQueueDepthSeries")
+	cn := clusterFilter(ctx)
+	return p.queryTimeseries(ctx, queryQueueDepthSeries, pool, cn, "GetQueueDepthSeries")
 }
 
 func (p *Provider) GetGPUUtilSeries(ctx context.Context, pool string) ([]inference.TimeseriesPoint, error) {
-	return p.queryTimeseries(ctx, queryGPUUtilSeries, pool, "GetGPUUtilSeries")
+	cn := clusterFilter(ctx)
+	return p.queryTimeseries(ctx, queryGPUUtilSeries, pool, cn, "GetGPUUtilSeries")
 }
 
 func (p *Provider) GetKVCacheSeries(ctx context.Context, pool string) ([]inference.TimeseriesPoint, error) {
-	return p.queryTimeseries(ctx, queryKVCacheSeries, pool, "GetKVCacheSeries")
+	cn := clusterFilter(ctx)
+	return p.queryTimeseries(ctx, queryKVCacheSeries, pool, cn, "GetKVCacheSeries")
 }
 
 // queryTimeseries is a helper for all timeseries queries that return (timestamp, value) rows.
-func (p *Provider) queryTimeseries(ctx context.Context, query, pool, label string) ([]inference.TimeseriesPoint, error) {
-	rows, err := p.client.Conn().Query(ctx, query, pool)
+func (p *Provider) queryTimeseries(ctx context.Context, query, pool, clusterName, label string) ([]inference.TimeseriesPoint, error) {
+	rows, err := p.client.Conn().Query(ctx, query, pool, clusterName, clusterName)
 	if err != nil {
 		return nil, fmt.Errorf("%s query: %w", label, err)
 	}

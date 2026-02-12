@@ -3,6 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { fetchGateways } from "@/api/gateways";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
+import { ALL_CLUSTERS } from "@/store/clusterStore";
+import { GlobalGatewayList } from "@/components/global/GlobalGatewayList";
 import type { Gateway } from "@/types/gateway";
 
 function timeAgo(dateStr: string): string {
@@ -19,7 +21,7 @@ function attachedRouteCount(gw: Gateway): number {
   return gw.status?.listeners.reduce((sum, l) => sum + l.attachedRoutes, 0) ?? 0;
 }
 
-export default function GatewayList() {
+function SingleClusterGatewayList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const nsFilter = searchParams.get("namespace") ?? "";
   const activeCluster = useActiveCluster();
@@ -109,4 +111,14 @@ export default function GatewayList() {
       )}
     </div>
   );
+}
+
+export default function GatewayList() {
+  const activeCluster = useActiveCluster();
+
+  if (activeCluster === ALL_CLUSTERS) {
+    return <GlobalGatewayList />;
+  }
+
+  return <SingleClusterGatewayList />;
 }

@@ -1,0 +1,32 @@
+---
+# Operator ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ngf-console-agent.fullname" . }}-operator
+  labels:
+    {{- include "ngf-console-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ngf-console-agent.fullname" . }}-operator
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ngf-console-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Heartbeat ClusterRoleBinding (read-only)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ngf-console-agent.fullname" . }}-heartbeat
+  labels:
+    {{- include "ngf-console-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ngf-console-agent.fullname" . }}-heartbeat
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ngf-console-agent.serviceAccountName" . }}-heartbeat
+    namespace: {{ .Release.Namespace }}

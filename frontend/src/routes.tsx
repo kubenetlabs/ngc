@@ -28,12 +28,18 @@ const MigrationList = lazy(() => import("@/pages/MigrationList"));
 const MigrationNew = lazy(() => import("@/pages/MigrationNew"));
 const AuditLog = lazy(() => import("@/pages/AuditLog"));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
+const ClusterManagement = lazy(() => import("@/pages/ClusterManagement"));
+const ClusterDetail = lazy(() => import("@/pages/ClusterDetail"));
+const ClusterRegister = lazy(() => import("@/pages/ClusterRegister"));
 
 export const routes: RouteObject[] = [
   {
     element: <MainLayout />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: "clusters", element: <ClusterManagement /> },
+      { path: "clusters/register", element: <ClusterRegister /> },
+      { path: "clusters/:name", element: <ClusterDetail /> },
       { path: "gateways", element: <GatewayList /> },
       { path: "gateways/create", element: <GatewayCreate /> },
       { path: "gateways/:ns/:name", element: <GatewayDetail /> },

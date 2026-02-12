@@ -13,11 +13,13 @@ import {
   Wrench,
   ScrollText,
   Settings,
+  Server,
 } from "lucide-react";
 import { useEdition } from "@/hooks/useEdition";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/clusters", label: "Clusters", icon: Server },
   { to: "/gateways", label: "Gateways", icon: Network },
   { to: "/inference", label: "Inference", icon: Cpu },
   { to: "/routes", label: "Routes", icon: Route },

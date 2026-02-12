@@ -8,13 +8,23 @@ The API server accepts the following command-line flags:
 |------|---------|-------------|
 | `--port` | `8080` | HTTP server listen port |
 | `--kubeconfig` | auto | Path to kubeconfig file. Auto-discovers in order: in-cluster, `KUBECONFIG` env, `~/.kube/config` |
-| `--clusters-config` | (none) | Path to multi-cluster YAML config file. Enables multi-cluster mode |
+| `--clusters-config` | (none) | Path to multi-cluster YAML config file. Enables file-based multi-cluster mode |
+| `--multicluster` | `false` | Enable CRD-based multi-cluster mode. Reads ManagedCluster CRDs from the hub cluster |
+| `--multicluster-namespace` | `ngf-system` | Namespace where ManagedCluster CRDs and kubeconfig Secrets are stored |
+| `--multicluster-default` | (auto) | Default cluster name for legacy routes. If not set, uses the first registered cluster |
 | `--db-type` | `mock` | Inference metrics backend. `mock` uses synthetic data, `clickhouse` queries real ClickHouse tables |
 | `--clickhouse-url` | `localhost:9000` | ClickHouse native protocol URL. Only used when `--db-type=clickhouse` |
 | `--prometheus-url` | (none) | Prometheus server URL (e.g., `http://prometheus:9090`). Enables RED metrics endpoints. Without this, `/metrics/*` returns 503 |
 | `--config-db` | `ngf-console.db` | Path to SQLite config database for alert rules, audit logs, and saved views |
 | `--alert-webhooks` | (none) | Comma-separated webhook URLs for alert notifications |
 | `--version` | | Print version and exit |
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated list of allowed CORS origins. In production, set to specific origins (e.g., `https://console.example.com`). When set to `*`, all origins are allowed (development only) |
+| `KUBECONFIG` | (none) | Path to kubeconfig file. Used if `--kubeconfig` flag is not set |
 
 ### Examples
 
@@ -28,10 +38,27 @@ go run ./cmd/server \
   --db-type clickhouse \
   --clickhouse-url localhost:9000
 
+# CRD-based multi-cluster
+go run ./cmd/server \
+  --multicluster \
+  --multicluster-namespace ngf-system \
+  --multicluster-default hub \
+  --db-type clickhouse \
+  --clickhouse-url clickhouse:9000 \
+  --prometheus-url http://prometheus:9090
+
+# File-based multi-cluster
+go run ./cmd/server \
+  --clusters-config /etc/ngf/clusters.yaml \
+  --db-type clickhouse \
+  --clickhouse-url clickhouse:9000
+
 # Full production configuration
+CORS_ALLOWED_ORIGINS=https://console.example.com \
 go run ./cmd/server \
   --port 8080 \
-  --clusters-config /etc/ngf/clusters.yaml \
+  --multicluster \
+  --multicluster-namespace ngf-system \
   --db-type clickhouse \
   --clickhouse-url clickhouse:9000 \
   --prometheus-url http://prometheus:9090 \
@@ -39,9 +66,9 @@ go run ./cmd/server \
   --alert-webhooks https://hooks.slack.com/xxx,https://webhook.site/yyy
 ```
 
-## Helm values
+## Hub Helm values
 
-The Helm chart is configured via `deploy/helm/ngf-console/values.yaml`. Below is the complete reference.
+The hub Helm chart is configured via `deploy/helm/ngf-console/values.yaml`. Below is the complete reference.
 
 ### NGF settings
 
@@ -167,7 +194,7 @@ otelCollector:
   mode: deployment             # "deployment" or "daemonset"
   image:
     repository: otel/opentelemetry-collector-contrib
-    tag: "latest"
+    tag: "0.96.0"
 ```
 
 ### Prometheus
@@ -251,9 +278,119 @@ serviceAccount:
   annotations: {}              # Add annotations for IAM roles, etc.
 ```
 
+## Agent Helm values
+
+The agent Helm chart (`charts/ngf-console-agent/values.yaml`) is installed on each workload cluster. It configures the operator, heartbeat reporter, and OTel forwarder.
+
+### Cluster identity
+
+```yaml
+cluster:
+  name: ""                     # Required: name of this cluster as registered on the hub
+```
+
+### Hub connection
+
+```yaml
+hub:
+  apiEndpoint: ""              # Required: hub API URL (e.g., https://hub.example.com)
+  otelEndpoint: ""             # Required: hub OTel Collector gRPC endpoint (e.g., hub.example.com:4317)
+  authToken: ""                # Optional: authentication token for hub API
+```
+
+### Operator
+
+The agent runs the same operator binary as the hub, reconciling CRDs locally on the workload cluster.
+
+```yaml
+operator:
+  enabled: true
+  replicas: 1
+  leaderElection: true
+  reconcileInterval: 60s
+  image:
+    repository: danny2guns/ngf-console-operator
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+```
+
+### Heartbeat reporter
+
+Sends cluster health to the hub at a configurable interval.
+
+```yaml
+heartbeat:
+  enabled: true
+  image:
+    repository: danny2guns/ngf-console-agent-heartbeat
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  intervalSeconds: 30          # How often to send heartbeats to the hub
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+```
+
+### OTel Collector (forwarder)
+
+Forwards telemetry from the workload cluster to the hub's OTel Collector, adding `cluster_name` as a resource attribute.
+
+```yaml
+otelCollector:
+  enabled: true
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: "0.96.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+```
+
+### Service account
+
+```yaml
+serviceAccount:
+  create: true
+  name: ngf-console-agent
+  annotations: {}
+```
+
+The chart creates two service accounts with separate RBAC:
+- `ngf-console-agent` -- Operator service account with full read-write access to CRDs and child resources
+- `ngf-console-agent-heartbeat` -- Heartbeat service account with read-only access (get/list on nodes, pods, CRDs)
+
+### Security
+
+All agent deployments run with hardened security contexts:
+- `runAsNonRoot: true` (UID 65534)
+- `readOnlyRootFilesystem: true`
+- `allowPrivilegeEscalation: false`
+- `capabilities: drop: [ALL]`
+- `seccompProfile: type: RuntimeDefault`
+
+Liveness and readiness probes are configured on all agent deployments.
+
 ## Multi-cluster configuration
 
-The clusters config file defines which Kubernetes clusters the API server manages.
+### File-based (clusters.yaml)
+
+The clusters config file defines which Kubernetes clusters the API server manages in file-based mode (`--clusters-config`).
 
 ```yaml
 # clusters.yaml
@@ -269,12 +406,65 @@ clusters:
     kubeconfig: /path/to/staging.yaml
 ```
 
-When multi-cluster mode is active:
+When file-based multi-cluster mode is active:
 - API routes are available at `/api/v1/clusters/{name}/...` (cluster-scoped)
 - Legacy routes at `/api/v1/...` use the default cluster
 - The frontend cluster switcher sets the `X-Cluster` header
 
+### CRD-based (ManagedCluster)
+
+In CRD-based mode (`--multicluster`), clusters are registered as `ManagedCluster` custom resources. See [Custom Resource Definitions](#managedcluster) below.
+
+When CRD-based multi-cluster mode is active:
+- The API reads ManagedCluster CRDs from `--multicluster-namespace`
+- Each ManagedCluster references a kubeconfig Secret (or uses `isLocal: true` for the hub)
+- The ClientPool builds and maintains K8s clients per cluster
+- A background health checker runs every 30s with per-cluster circuit breakers
+- Cluster management endpoints are available at `/api/v1/clusters`
+- Global aggregation endpoints are available at `/api/v1/global/*`
+- Agents on workload clusters send heartbeats to `/api/v1/clusters/{name}/heartbeat`
+
 ## Custom Resource Definitions
+
+### ManagedCluster
+
+Represents a registered Kubernetes cluster in the hub (`ngf-console.f5.com/v1alpha1`).
+
+```yaml
+apiVersion: ngf-console.f5.com/v1alpha1
+kind: ManagedCluster
+metadata:
+  name: workload-west
+  namespace: ngf-system
+spec:
+  displayName: "Workload US-West-2"     # Human-readable name
+  region: us-west-2                      # Cloud region
+  environment: production                # Environment label (production, staging, dev, etc.)
+  isLocal: false                         # true for the hub cluster (uses in-cluster config)
+  ngfEdition: enterprise                 # "enterprise" or "oss"
+  kubeconfigSecretRef:
+    name: workload-west-kubeconfig       # Secret containing kubeconfig data
+  agentConfig:
+    heartbeatInterval: 30s               # Agent heartbeat interval
+    otelEndpoint: hub.example.com:4317   # Override OTel endpoint
+
+status:
+  phase: Ready                           # Ready, Pending, Degraded, Unreachable
+  kubernetesVersion: "1.30.2"
+  ngfVersion: "1.6.2"
+  agentInstalled: true
+  lastHeartbeat: "2024-01-15T10:30:00Z"
+  resourceCounts:
+    gateways: 3
+    httpRoutes: 12
+    inferencePools: 2
+  gpuCapacity:
+    totalGPUs: 8
+    allocatedGPUs: 6
+    gpuTypes:
+      H100: 4
+      A100: 4
+```
 
 ### InferenceStack
 
@@ -399,7 +589,7 @@ The operator reconciles these child resources from a GatewayBundle:
 
 ### Status fields
 
-Both CRDs report status with:
+Both InferenceStack and GatewayBundle CRDs report status with:
 
 ```yaml
 status:
@@ -426,16 +616,21 @@ status:
 
 ## ClickHouse schema
 
-Four MergeTree tables populated by the OTel Collector:
+Tables populated by the OTel Collector. All tables include `cluster_name LowCardinality(String)` for multi-cluster filtering:
 
-| Table | Description |
-|-------|-------------|
-| `ngf_inference_pools` | Pool metadata (name, model, GPU type, replicas, status) |
-| `ngf_epp_decisions` | EPP routing decisions with latency and strategy |
-| `ngf_pod_metrics` | Per-pod GPU utilization, memory, temperature, queue depth |
-| `ngf_inference_metrics_1m` | 1-minute aggregated metrics (TTFT, TPS, GPU util, KV-cache) |
+| Table | Engine | Description |
+|-------|--------|-------------|
+| `ngf_access_logs` | MergeTree | HTTP access logs with request/response details |
+| `ngf_inference_logs` | MergeTree | Inference request logs (model, tokens, latency) |
+| `ngf_inference_pools` | MergeTree | Pool metadata (name, model, GPU type, replicas, status) |
+| `ngf_epp_decisions` | MergeTree | EPP routing decisions with latency and strategy |
+| `ngf_pod_metrics` | MergeTree | Per-pod GPU utilization, memory, temperature, queue depth |
+| `ngf_metrics_1m` | AggregatingMergeTree | 1-minute aggregated RED metrics |
+| `ngf_inference_metrics_1m` | AggregatingMergeTree | 1-minute aggregated inference metrics |
 
-See `deploy/docker-compose/clickhouse/seed.sql` for the complete schema and demo data.
+Materialized views use `-State` combinators (`countState()`, `avgState()`, `quantileState()`, `sumState()`, `maxState()`) for correct aggregation across merges.
+
+See `deploy/docker-compose/clickhouse/init.sql` for the complete schema and demo data.
 
 ## Alert configuration
 
@@ -484,3 +679,5 @@ wscat -c ws://localhost:8080/api/v1/ws/inference/epp-decisions
 ```
 
 In development, these stream mock data. In production with ClickHouse, they stream real telemetry data.
+
+The WebSocket client reconnects with exponential backoff (1s base, 30s max, with random jitter) on disconnection.

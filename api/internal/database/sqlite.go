@@ -288,4 +288,28 @@ CREATE TABLE IF NOT EXISTS saved_views (
 );
 
 CREATE INDEX IF NOT EXISTS idx_saved_views_user ON saved_views(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_audit_cluster ON audit_log(cluster);
+
+CREATE TABLE IF NOT EXISTS managed_clusters (
+	name TEXT PRIMARY KEY,
+	display_name TEXT NOT NULL,
+	region TEXT NOT NULL DEFAULT '',
+	environment TEXT NOT NULL DEFAULT '',
+	phase TEXT NOT NULL DEFAULT 'Pending',
+	kubernetes_version TEXT NOT NULL DEFAULT '',
+	ngf_version TEXT NOT NULL DEFAULT '',
+	agent_installed BOOLEAN NOT NULL DEFAULT 0,
+	last_heartbeat DATETIME,
+	total_gpus INTEGER NOT NULL DEFAULT 0,
+	registered_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cluster_groups (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	cluster_names TEXT NOT NULL DEFAULT '[]',
+	created_at DATETIME NOT NULL
+);
 `

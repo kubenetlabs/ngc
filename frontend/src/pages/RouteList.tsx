@@ -3,6 +3,8 @@ import { useSearchParams, Link } from "react-router-dom";
 import { fetchHTTPRoutes } from "@/api/routes";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
+import { ALL_CLUSTERS } from "@/store/clusterStore";
+import { GlobalRouteList } from "@/components/global/GlobalRouteList";
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -14,7 +16,7 @@ function timeAgo(dateStr: string): string {
   return `${mins}m ago`;
 }
 
-export default function RouteList() {
+function SingleClusterRouteList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const nsFilter = searchParams.get("namespace") ?? "";
   const activeCluster = useActiveCluster();
@@ -107,4 +109,14 @@ export default function RouteList() {
       )}
     </div>
   );
+}
+
+export default function RouteList() {
+  const activeCluster = useActiveCluster();
+
+  if (activeCluster === ALL_CLUSTERS) {
+    return <GlobalRouteList />;
+  }
+
+  return <SingleClusterRouteList />;
 }

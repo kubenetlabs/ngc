@@ -336,9 +336,156 @@ kubectl delete -f deploy/helm/ngf-console/crds/
 
 ## Multi-cluster setup
 
-### Local development
+NGF Console supports two multi-cluster modes: file-based (for development) and CRD-based (for production).
 
-Create a `clusters.yaml` file:
+### Option A: CRD-based multi-cluster (recommended)
+
+Uses `ManagedCluster` custom resources to register clusters on the hub. Each workload cluster runs a lightweight agent that reports health and forwards telemetry. This is the recommended mode for production.
+
+#### 1. Install the ManagedCluster CRD on the hub
+
+```bash
+kubectl apply -f deploy/helm/ngf-console/crds/ngf-console.f5.com_managedclusters.yaml
+```
+
+#### 2. Start the API in multi-cluster mode
+
+For local development:
+
+```bash
+cd api && go run ./cmd/server \
+  --multicluster \
+  --multicluster-namespace ngf-system \
+  --multicluster-default my-hub-cluster
+```
+
+For Kubernetes deployment, add these flags to the API server or set the corresponding Helm values:
+
+```bash
+helm upgrade ngf-console deploy/helm/ngf-console \
+  --namespace ngf-console \
+  --set api.multicluster.enabled=true \
+  --set api.multicluster.namespace=ngf-system
+```
+
+#### 3. Register the hub as a local cluster
+
+The hub cluster itself can be registered as a ManagedCluster with `isLocal: true`:
+
+```yaml
+apiVersion: ngf-console.f5.com/v1alpha1
+kind: ManagedCluster
+metadata:
+  name: hub
+  namespace: ngf-system
+spec:
+  displayName: "Hub (US-East-1)"
+  region: us-east-1
+  environment: production
+  isLocal: true
+  ngfEdition: enterprise
+```
+
+#### 4. Register a workload cluster
+
+Via the API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/clusters \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "workload-west",
+    "displayName": "Workload US-West-2",
+    "region": "us-west-2",
+    "environment": "production",
+    "kubeconfig": "<contents-of-kubeconfig-file>"
+  }'
+```
+
+Or via kubectl:
+
+```bash
+# Create the kubeconfig Secret
+kubectl create secret generic workload-west-kubeconfig \
+  -n ngf-system \
+  --from-file=kubeconfig=/path/to/workload-kubeconfig.yaml
+
+# Create the ManagedCluster
+kubectl apply -f - <<EOF
+apiVersion: ngf-console.f5.com/v1alpha1
+kind: ManagedCluster
+metadata:
+  name: workload-west
+  namespace: ngf-system
+spec:
+  displayName: "Workload US-West-2"
+  region: us-west-2
+  environment: production
+  ngfEdition: enterprise
+  kubeconfigSecretRef:
+    name: workload-west-kubeconfig
+EOF
+```
+
+#### 5. Install the agent on the workload cluster
+
+Get the agent install command from the API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/clusters/workload-west/install-agent
+```
+
+Or install directly:
+
+```bash
+helm install ngf-console-agent charts/ngf-console-agent \
+  --namespace ngf-system --create-namespace \
+  --set cluster.name=workload-west \
+  --set hub.apiEndpoint=https://hub.example.com \
+  --set hub.otelEndpoint=hub.example.com:4317 \
+  --kube-context <workload-cluster-context>
+```
+
+The agent chart installs three components:
+- **Operator**: Reconciles InferenceStack and GatewayBundle CRDs on the workload cluster
+- **Heartbeat Reporter**: Sends health data to the hub every 30 seconds
+- **OTel Forwarder**: Forwards telemetry to the hub with `cluster_name` tagging
+
+#### 6. Verify
+
+```bash
+# Check agent pods on the workload cluster
+kubectl get pods -n ngf-system --context <workload-cluster-context>
+# Expected:
+# ngf-console-agent-operator-xxxx       1/1     Running
+# ngf-console-agent-heartbeat-xxxx      1/1     Running
+# ngf-console-agent-otel-xxxx           1/1     Running
+
+# Check cluster status on the hub (wait ~30s for first heartbeat)
+curl http://localhost:8080/api/v1/clusters | jq
+# Should show workload-west with connected: true
+
+# Test connectivity
+curl -X POST http://localhost:8080/api/v1/clusters/workload-west/test | jq
+
+# Get cluster detail
+curl http://localhost:8080/api/v1/clusters/workload-west/detail | jq
+
+# List gateways on the workload cluster
+curl http://localhost:8080/api/v1/clusters/workload-west/gateways | jq
+
+# Global view across all clusters
+curl http://localhost:8080/api/v1/global/gateways | jq
+
+# Cluster summary
+curl http://localhost:8080/api/v1/clusters/summary | jq
+```
+
+### Option B: File-based multi-cluster (development)
+
+Uses a static YAML file to define clusters. Simpler but doesn't support agents, heartbeats, or dynamic registration.
+
+#### 1. Create clusters.yaml
 
 ```yaml
 clusters:
@@ -357,13 +504,13 @@ clusters:
     kubeconfig: /path/to/dev-kubeconfig.yaml
 ```
 
-Start with:
+#### 2. Start with clusters config
 
 ```bash
 cd api && go run ./cmd/server --clusters-config clusters.yaml
 ```
 
-### Kubernetes deployment
+#### Kubernetes deployment (file-based)
 
 1. Create kubeconfig secrets for each remote cluster:
 
@@ -391,9 +538,9 @@ kubectl create configmap clusters-config \
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | Yes | Lowercase alphanumeric with hyphens, 1-63 chars |
+| `name` | Yes | Lowercase alphanumeric with hyphens, 1-63 chars (RFC 1123 DNS subdomain) |
 | `displayName` | No | Human-readable name shown in the UI |
-| `kubeconfig` | Yes | Absolute path to the kubeconfig file |
+| `kubeconfig` | Yes (file) | Absolute path to the kubeconfig file |
 | `context` | No | Specific context within the kubeconfig; defaults to current-context |
 | `default` | No | At most one cluster; if none, the first entry is used |
 
@@ -436,7 +583,12 @@ curl http://localhost:8080/api/v1/health
 
 # List clusters
 curl http://localhost:8080/api/v1/clusters
-# [{"name":"default","displayName":"default","default":true}]
+# In single-cluster mode: [{"name":"default","displayName":"default","default":true}]
+# In multi-cluster mode: [{"name":"hub","displayName":"Hub","connected":true,...}, ...]
+
+# Cluster summary (multi-cluster mode)
+curl http://localhost:8080/api/v1/clusters/summary
+# {"totalClusters":2,"healthyClusters":2,"totalGateways":5,"totalRoutes":12,"totalGPUs":8}
 
 # Inference summary (mock data)
 curl http://localhost:8080/api/v1/inference/metrics/summary
@@ -454,6 +606,13 @@ wscat -c ws://localhost:8080/api/v1/ws/inference/epp-decisions
 - **"failed to create kubernetes client"**: No kubeconfig found. Pass `--kubeconfig` or ensure `~/.kube/config` exists. The API still starts if you only need inference mock data -- check your kubeconfig path.
 - **"failed to create clickhouse client"**: ClickHouse is unreachable at the given URL. When `--db-type=clickhouse` is explicitly set, a connection failure is fatal. Ensure ClickHouse is running or omit `--db-type` to use mock data.
 - **"failed to open config database"**: SQLite database path is not writable. Check permissions on the `--config-db` path.
+- **"failed to sync cluster pool"**: CRD-based multi-cluster mode failed to list ManagedCluster CRDs. Ensure the ManagedCluster CRD is installed and the API server has RBAC to list resources in the `--multicluster-namespace`.
+
+### Multi-cluster issues
+
+- **Cluster shows "connected: false"**: Check that the kubeconfig Secret exists and contains a valid kubeconfig. Verify the workload cluster is reachable from the hub. Check API server logs for circuit breaker state.
+- **Agent heartbeat not received**: Verify agent pods are running on the workload cluster (`kubectl get pods -n ngf-system`). Check the heartbeat deployment logs. Ensure the hub API endpoint is reachable from the workload cluster.
+- **"cluster not found or circuit breaker open"**: The circuit breaker opens after 3 consecutive health check failures. It resets automatically after 30 seconds. Check the workload cluster's network connectivity.
 
 ### Operator pods crash-looping
 
@@ -472,3 +631,4 @@ wscat -c ws://localhost:8080/api/v1/ws/inference/epp-decisions
 - WebSocket connections go through `/api/v1/ws/inference/{topic}`
 - Check that no reverse proxy is terminating WebSocket connections prematurely
 - The hub drops messages to slow clients rather than blocking -- this is expected behavior
+- The client reconnects with exponential backoff (1s base, 30s max, with jitter)

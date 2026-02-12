@@ -11,6 +11,7 @@ data:
   init.sql: |
     CREATE TABLE IF NOT EXISTS ngf_access_logs (
         timestamp DateTime64(3),
+        cluster_name LowCardinality(String) DEFAULT '',
         gateway String,
         listener String,
         route String,
@@ -37,11 +38,12 @@ data:
         xc_edge_latency_ms Float64
     ) ENGINE = MergeTree()
     PARTITION BY toYYYYMMDD(timestamp)
-    ORDER BY (gateway, route, timestamp)
+    ORDER BY (cluster_name, gateway, route, timestamp)
     TTL timestamp + INTERVAL 7 DAY;
 
     CREATE TABLE IF NOT EXISTS ngf_inference_logs (
         timestamp DateTime64(3),
+        cluster_name LowCardinality(String) DEFAULT '',
         inference_pool String,
         model_name String,
         model_version String,
@@ -80,50 +82,52 @@ data:
         xc_bot_classification LowCardinality(String)
     ) ENGINE = MergeTree()
     PARTITION BY toYYYYMMDD(timestamp)
-    ORDER BY (inference_pool, model_name, timestamp)
+    ORDER BY (cluster_name, inference_pool, model_name, timestamp)
     TTL timestamp + INTERVAL 14 DAY;
 
     CREATE MATERIALIZED VIEW IF NOT EXISTS ngf_metrics_1m
-    ENGINE = SummingMergeTree()
+    ENGINE = AggregatingMergeTree()
     PARTITION BY toYYYYMMDD(window_start)
-    ORDER BY (gateway, route, status_class, window_start)
+    ORDER BY (cluster_name, gateway, route, status_class, window_start)
     TTL window_start + INTERVAL 90 DAY
     AS SELECT
         toStartOfMinute(timestamp) AS window_start,
+        cluster_name,
         gateway, route,
         multiIf(status < 200, '1xx', status < 300, '2xx', status < 400, '3xx',
                 status < 500, '4xx', '5xx') AS status_class,
-        count() AS request_count,
-        avg(latency_ms) AS avg_latency,
-        quantile(0.95)(latency_ms) AS p95_latency,
-        quantile(0.99)(latency_ms) AS p99_latency,
-        sum(request_size) AS total_request_bytes,
-        sum(response_size) AS total_response_bytes
+        countState() AS request_count,
+        avgState(latency_ms) AS avg_latency,
+        quantileState(0.95)(latency_ms) AS p95_latency,
+        quantileState(0.99)(latency_ms) AS p99_latency,
+        sumState(request_size) AS total_request_bytes,
+        sumState(response_size) AS total_response_bytes
     FROM ngf_access_logs
-    GROUP BY window_start, gateway, route, status_class;
+    GROUP BY window_start, cluster_name, gateway, route, status_class;
 
     CREATE MATERIALIZED VIEW IF NOT EXISTS ngf_inference_metrics_1m
-    ENGINE = SummingMergeTree()
+    ENGINE = AggregatingMergeTree()
     PARTITION BY toYYYYMMDD(window_start)
-    ORDER BY (inference_pool, model_name, window_start)
+    ORDER BY (cluster_name, inference_pool, model_name, window_start)
     TTL window_start + INTERVAL 90 DAY
     AS SELECT
         toStartOfMinute(timestamp) AS window_start,
+        cluster_name,
         inference_pool,
         model_name,
-        count() AS request_count,
-        avg(time_to_first_token_ms) AS avg_ttft,
-        quantile(0.50)(time_to_first_token_ms) AS p50_ttft,
-        quantile(0.95)(time_to_first_token_ms) AS p95_ttft,
-        quantile(0.99)(time_to_first_token_ms) AS p99_ttft,
-        avg(tokens_per_second) AS avg_tps,
-        sum(tokens_generated) AS total_tokens,
-        avg(queue_depth_at_selection) AS avg_queue_depth,
-        avg(kv_cache_pct_at_selection) AS avg_kv_cache_pct,
-        avg(gpu_utilization_pct) AS avg_gpu_util,
-        avg(gpu_memory_used_mb) AS avg_gpu_mem_used,
-        max(gpu_memory_used_mb) AS max_gpu_mem_used,
-        avg(epp_decision_latency_us) AS avg_epp_latency
+        countState() AS request_count,
+        avgState(time_to_first_token_ms) AS avg_ttft,
+        quantileState(0.50)(time_to_first_token_ms) AS p50_ttft,
+        quantileState(0.95)(time_to_first_token_ms) AS p95_ttft,
+        quantileState(0.99)(time_to_first_token_ms) AS p99_ttft,
+        avgState(tokens_per_second) AS avg_tps,
+        sumState(tokens_generated) AS total_tokens,
+        avgState(queue_depth_at_selection) AS avg_queue_depth,
+        avgState(kv_cache_pct_at_selection) AS avg_kv_cache_pct,
+        avgState(gpu_utilization_pct) AS avg_gpu_util,
+        avgState(gpu_memory_used_mb) AS avg_gpu_mem_used,
+        maxState(gpu_memory_used_mb) AS max_gpu_mem_used,
+        avgState(epp_decision_latency_us) AS avg_epp_latency
     FROM ngf_inference_logs
-    GROUP BY window_start, inference_pool, model_name;
+    GROUP BY window_start, cluster_name, inference_pool, model_name;
 {{- end }}

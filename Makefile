@@ -1,4 +1,4 @@
-.PHONY: all build test lint dev clean docker-build docker-push helm-package helm-install helm-template
+.PHONY: all build test lint dev clean docker-build docker-push helm-package helm-install helm-template build-agent-heartbeat docker-build-agent-heartbeat docker-build-agent helm-package-agent
 
 VERSION ?= 0.1.0
 REGISTRY ?= registry.f5.com/ngf-console
@@ -23,7 +23,7 @@ dev-compose:
 # Build
 # ──────────────────────────────────────────────
 
-build: build-frontend build-api build-operator build-migration-cli
+build: build-frontend build-api build-operator build-migration-cli build-agent-heartbeat
 
 build-frontend:
 	cd frontend && pnpm install && pnpm build
@@ -37,11 +37,14 @@ build-operator:
 build-migration-cli:
 	cd migration-cli && go build -o bin/ngf-migrate .
 
+build-agent-heartbeat:
+	cd agent && go build -o bin/heartbeat ./cmd/heartbeat
+
 # ──────────────────────────────────────────────
 # Docker
 # ──────────────────────────────────────────────
 
-docker-build: docker-build-frontend docker-build-api docker-build-operator docker-build-migration-cli
+docker-build: docker-build-frontend docker-build-api docker-build-operator docker-build-migration-cli docker-build-agent
 
 docker-build-frontend:
 	docker build -t $(REGISTRY)/frontend:$(VERSION) frontend/
@@ -55,6 +58,11 @@ docker-build-operator:
 docker-build-migration-cli:
 	docker build -t $(REGISTRY)/migration:$(VERSION) migration-cli/
 
+docker-build-agent-heartbeat:
+	docker build -t $(REGISTRY)/agent-heartbeat:$(VERSION) -f agent/Dockerfile.heartbeat agent/
+
+docker-build-agent: docker-build-agent-heartbeat
+
 docker-push:
 	docker push $(REGISTRY)/frontend:$(VERSION)
 	docker push $(REGISTRY)/api:$(VERSION)
@@ -67,6 +75,9 @@ docker-push:
 
 helm-package:
 	helm package deploy/helm/ngf-console
+
+helm-package-agent:
+	helm package charts/ngf-console-agent
 
 helm-install:
 	helm install ngf-console deploy/helm/ngf-console --namespace ngf-system --create-namespace

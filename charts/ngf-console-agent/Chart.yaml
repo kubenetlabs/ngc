@@ -1,0 +1,15 @@
+apiVersion: v2
+name: ngf-console-agent
+description: NGF Console Agent — lightweight agent for workload clusters
+version: 0.1.0
+appVersion: "0.1.0"
+type: application
+keywords:
+  - nginx
+  - gateway-api
+  - kubernetes
+  - multi-cluster
+  - observability
+home: https://github.com/kubenetlabs/ngc
+maintainers:
+  - name: NGF Console Team

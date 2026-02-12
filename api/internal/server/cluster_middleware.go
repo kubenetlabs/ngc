@@ -12,7 +12,7 @@ import (
 // ClusterResolver is middleware that extracts the cluster from the URL or
 // falls back to the default cluster. It stores the resolved client and
 // cluster name in the request context.
-func ClusterResolver(mgr *cluster.Manager) func(http.Handler) http.Handler {
+func ClusterResolver(mgr cluster.Provider) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			clusterName := chi.URLParam(r, "cluster")

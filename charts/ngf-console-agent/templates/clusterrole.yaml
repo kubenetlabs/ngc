@@ -1,0 +1,72 @@
+---
+# Operator ClusterRole: full read-write access for CRD reconciliation.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ngf-console-agent.fullname" . }}-operator
+  labels:
+    {{- include "ngf-console-agent.labels" . | nindent 4 }}
+rules:
+  # Core resources
+  - apiGroups: [""]
+    resources: ["namespaces", "services", "nodes", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  # Gateway API resources
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways", "gatewayclasses", "httproutes", "grpcroutes", "tlsroutes", "tcproutes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # NGF Console CRDs
+  - apiGroups: ["ngf-console.f5.com"]
+    resources: ["gatewaybundles", "gatewaybundles/status", "inferencestacks", "inferencestacks/status", "distributedcloudpublishes", "distributedcloudpublishes/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Inference extension
+  - apiGroups: ["inference.networking.x-k8s.io"]
+    resources: ["inferencepools", "inferencemodels"]
+    verbs: ["get", "list", "watch"]
+  # KEDA
+  - apiGroups: ["keda.sh"]
+    resources: ["scaledobjects", "triggerauthentications"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Apps
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # API extensions
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+  # Coordination for leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+# Heartbeat ClusterRole: read-only access for cluster discovery.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ngf-console-agent.fullname" . }}-heartbeat
+  labels:
+    {{- include "ngf-console-agent.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways", "gatewayclasses", "httproutes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["inference.networking.x-k8s.io"]
+    resources: ["inferencepools", "inferencemodels"]
+    verbs: ["get", "list"]
+  - apiGroups: ["ngf-console.f5.com"]
+    resources: ["gatewaybundles", "inferencestacks"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]

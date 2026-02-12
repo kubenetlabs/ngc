@@ -10,10 +10,22 @@ import (
 	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
 )
 
+// Provider is the interface satisfied by both the file-based Manager and
+// the CRD-based PoolAdapter, allowing the API server to swap implementations.
+type Provider interface {
+	Get(name string) (*kubernetes.Client, error)
+	Default() (*kubernetes.Client, error)
+	DefaultName() string
+	List(ctx context.Context) []ClusterInfo
+	Names() []string
+}
+
 // ClusterInfo represents a cluster's status as returned to API consumers.
 type ClusterInfo struct {
 	Name        string             `json:"name"`
 	DisplayName string             `json:"displayName"`
+	Region      string             `json:"region,omitempty"`
+	Environment string             `json:"environment,omitempty"`
 	Connected   bool               `json:"connected"`
 	Edition     kubernetes.Edition `json:"edition"`
 	Default     bool               `json:"default"`

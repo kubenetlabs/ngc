@@ -16,6 +16,12 @@ data:
             endpoint: 0.0.0.0:4317
           http:
             endpoint: 0.0.0.0:4318
+      {{- if .Values.multiCluster.enabled }}
+      otlp/agents:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4320
+      {{- end }}
 
     processors:
       batch:
@@ -26,6 +32,13 @@ data:
           - key: service.name
             value: ngf-console
             action: upsert
+      {{- if .Values.multiCluster.enabled }}
+      resource/local:
+        attributes:
+          - key: cluster_name
+            value: {{ .Values.multiCluster.hubClusterName | default "hub" }}
+            action: upsert
+      {{- end }}
 
     exporters:
       clickhouse:
@@ -43,10 +56,20 @@ data:
       pipelines:
         logs:
           receivers: [otlp]
-          processors: [batch, resource]
+          processors: [batch, resource{{- if .Values.multiCluster.enabled }}, resource/local{{- end }}]
           exporters: [clickhouse]
         metrics:
           receivers: [otlp]
-          processors: [batch, resource]
+          processors: [batch, resource{{- if .Values.multiCluster.enabled }}, resource/local{{- end }}]
           exporters: [prometheus]
+        {{- if .Values.multiCluster.enabled }}
+        logs/agents:
+          receivers: [otlp/agents]
+          processors: [batch]
+          exporters: [clickhouse]
+        metrics/agents:
+          receivers: [otlp/agents]
+          processors: [batch]
+          exporters: [prometheus]
+        {{- end }}
 {{- end }}

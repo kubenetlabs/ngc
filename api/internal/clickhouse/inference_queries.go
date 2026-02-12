@@ -2,6 +2,7 @@ package clickhouse
 
 // SQL queries for inference metrics.
 // These target ClickHouse MergeTree tables populated by the OTel Collector.
+// All queries include an optional cluster_name filter: pass '' to match all clusters.
 
 const queryListPools = `
 SELECT
@@ -9,6 +10,7 @@ SELECT
     gpu_type, gpu_count, replicas, ready_replicas, min_replicas, max_replicas,
     status, created_at
 FROM ngf_inference_pools
+WHERE (? = '' OR cluster_name = ?)
 ORDER BY name
 `
 
@@ -19,6 +21,7 @@ SELECT
     status, created_at
 FROM ngf_inference_pools
 WHERE name = ?
+  AND (? = '' OR cluster_name = ?)
 LIMIT 1
 `
 
@@ -36,6 +39,7 @@ SELECT
 FROM ngf_inference_metrics_1m
 WHERE timestamp >= now() - INTERVAL 60 MINUTE
   AND (? = '' OR pool_name = ?)
+  AND (? = '' OR cluster_name = ?)
 `
 
 const queryPodMetrics = `
@@ -46,6 +50,7 @@ SELECT
     requests_in_flight
 FROM ngf_pod_metrics
 WHERE pool_name = ?
+  AND (? = '' OR cluster_name = ?)
 ORDER BY pod_name
 `
 
@@ -56,6 +61,7 @@ SELECT
     decision_latency_us
 FROM ngf_epp_decisions
 WHERE pool_name = ?
+  AND (? = '' OR cluster_name = ?)
 ORDER BY timestamp DESC
 LIMIT ?
 `
@@ -67,6 +73,7 @@ SELECT
     count() AS cnt
 FROM ngf_inference_metrics_1m
 WHERE pool_name = ?
+  AND (? = '' OR cluster_name = ?)
   AND timestamp >= now() - INTERVAL 60 MINUTE
 GROUP BY range_start, range_end
 ORDER BY range_start
@@ -78,6 +85,7 @@ SELECT
     avg(tps) AS value
 FROM ngf_inference_metrics_1m
 WHERE pool_name = ?
+  AND (? = '' OR cluster_name = ?)
   AND timestamp >= now() - INTERVAL 60 MINUTE
 GROUP BY ts
 ORDER BY ts
@@ -89,6 +97,7 @@ SELECT
     avg(queue_depth) AS value
 FROM ngf_inference_metrics_1m
 WHERE pool_name = ?
+  AND (? = '' OR cluster_name = ?)
   AND timestamp >= now() - INTERVAL 60 MINUTE
 GROUP BY ts
 ORDER BY ts
@@ -100,6 +109,7 @@ SELECT
     avg(gpu_util_pct) AS value
 FROM ngf_inference_metrics_1m
 WHERE pool_name = ?
+  AND (? = '' OR cluster_name = ?)
   AND timestamp >= now() - INTERVAL 60 MINUTE
 GROUP BY ts
 ORDER BY ts
@@ -111,6 +121,7 @@ SELECT
     avg(kv_cache_pct) AS value
 FROM ngf_inference_metrics_1m
 WHERE pool_name = ?
+  AND (? = '' OR cluster_name = ?)
   AND timestamp >= now() - INTERVAL 60 MINUTE
 GROUP BY ts
 ORDER BY ts

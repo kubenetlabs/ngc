@@ -8,12 +8,15 @@ import (
 	"os"
 	"strings"
 
+	"time"
+
 	"github.com/kubenetlabs/ngc/api/internal/alerting"
 	chprovider "github.com/kubenetlabs/ngc/api/internal/clickhouse"
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
 	"github.com/kubenetlabs/ngc/api/internal/database"
 	"github.com/kubenetlabs/ngc/api/internal/inference"
 	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
+	mc "github.com/kubenetlabs/ngc/api/internal/multicluster"
 	prom "github.com/kubenetlabs/ngc/api/internal/prometheus"
 	"github.com/kubenetlabs/ngc/api/internal/server"
 	"github.com/kubenetlabs/ngc/api/pkg/version"
@@ -28,6 +31,9 @@ func main() {
 	prometheusURL := flag.String("prometheus-url", "", "Prometheus server URL (e.g., http://prometheus:9090)")
 	configDB := flag.String("config-db", "ngf-console.db", "Path to SQLite config database")
 	alertWebhooks := flag.String("alert-webhooks", "", "Comma-separated webhook URLs for alert notifications")
+	multicluster := flag.Bool("multicluster", false, "Enable CRD-based multi-cluster mode (reads ManagedCluster CRDs)")
+	multiclusterNS := flag.String("multicluster-namespace", "ngf-system", "Namespace for ManagedCluster CRDs")
+	multiclusterDefault := flag.String("multicluster-default", "", "Default cluster name in multi-cluster mode")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
 
@@ -48,19 +54,45 @@ func main() {
 		"version", version.Version,
 	)
 
-	var mgr *cluster.Manager
-	if *clustersConfig != "" {
+	var mgr cluster.Provider
+	var pool *mc.ClientPool
+	if *multicluster {
+		// CRD-based multi-cluster mode: read ManagedCluster CRDs from hub.
+		k8sClient, err := kubernetes.New(*kubeconfig)
+		if err != nil {
+			slog.Error("failed to create hub kubernetes client", "error", err)
+			os.Exit(1)
+		}
+		pool = mc.NewClientPool(k8sClient.DynamicClient(), *multiclusterNS)
+		if err := pool.Sync(context.Background()); err != nil {
+			slog.Error("failed to sync cluster pool", "error", err)
+			os.Exit(1)
+		}
+		defaultName := *multiclusterDefault
+		if defaultName == "" {
+			names := pool.Names()
+			if len(names) > 0 {
+				defaultName = names[0]
+			}
+		}
+		mgr = mc.NewPoolAdapter(pool, defaultName)
+		slog.Info("CRD-based multi-cluster mode enabled", "clusters", pool.Names(), "namespace", *multiclusterNS)
+
+		// Start health checker.
+		go mc.RunHealthChecker(context.Background(), pool, 30*time.Second)
+	} else if *clustersConfig != "" {
 		cfg, err := cluster.LoadConfig(*clustersConfig)
 		if err != nil {
 			slog.Error("failed to load clusters config", "error", err)
 			os.Exit(1)
 		}
-		mgr, err = cluster.New(cfg)
+		fileMgr, err := cluster.New(cfg)
 		if err != nil {
 			slog.Error("failed to create cluster manager", "error", err)
 			os.Exit(1)
 		}
-		slog.Info("multi-cluster mode enabled", "clusters", mgr.Names())
+		mgr = fileMgr
+		slog.Info("file-based multi-cluster mode enabled", "clusters", fileMgr.Names())
 	} else {
 		k8sClient, err := kubernetes.New(*kubeconfig)
 		if err != nil {
@@ -134,6 +166,7 @@ func main() {
 		PromClient:      promClient,
 		CHClient:        chClient,
 		Webhooks:        webhooks,
+		Pool:            pool,
 	})
 
 	addr := fmt.Sprintf(":%d", *port)

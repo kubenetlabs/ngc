@@ -1,0 +1,59 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ngf-console-agent.fullname" . }}-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ngf-console-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+spec:
+  replicas: {{ .Values.operator.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ngf-console-agent.name" . }}
+      app.kubernetes.io/component: operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "ngf-console-agent.name" . }}
+        app.kubernetes.io/component: operator
+    spec:
+      serviceAccountName: {{ include "ngf-console-agent.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: operator
+          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          args:
+            {{- if .Values.operator.leaderElection }}
+            - --leader-elect
+            {{- end }}
+            - --reconcile-interval={{ .Values.operator.reconcileInterval }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}
+{{- end }}

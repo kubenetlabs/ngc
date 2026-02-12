@@ -1,6 +1,6 @@
 # API Reference
 
-The NGF Console API server exposes a RESTful API at `/api/v1/`. All routes support both cluster-scoped (`/api/v1/clusters/{cluster}/...`) and legacy (`/api/v1/...`) paths.
+The NGF Console API server exposes a RESTful API at `/api/v1/`. All resource routes support both cluster-scoped (`/api/v1/clusters/{cluster}/...`) and legacy (`/api/v1/...`) paths. Cluster management and global aggregation endpoints operate at the hub level.
 
 ## Health
 
@@ -10,11 +10,171 @@ The NGF Console API server exposes a RESTful API at `/api/v1/`. All routes suppo
 
 Response: `{"status": "ok"}`
 
-## Clusters
+## Cluster Management
+
+Hub-level endpoints for managing registered clusters. Available in CRD-based multi-cluster mode (`--multicluster`).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/clusters` | List all configured clusters |
+| GET | `/api/v1/clusters` | List all registered clusters with health status |
+| POST | `/api/v1/clusters` | Register a new cluster (creates ManagedCluster CRD + kubeconfig Secret) |
+| GET | `/api/v1/clusters/summary` | Global summary across all clusters (total clusters, gateways, routes, GPUs) |
+| GET | `/api/v1/clusters/{cluster}/detail` | Get detailed cluster info (edition, K8s version, NGF version, agent status, resource counts, GPU capacity) |
+| DELETE | `/api/v1/clusters/{cluster}` | Unregister a cluster (deletes ManagedCluster CRD + kubeconfig Secret) |
+| POST | `/api/v1/clusters/{cluster}/test` | Test connectivity to a cluster |
+| POST | `/api/v1/clusters/{cluster}/install-agent` | Generate Helm install command for the agent chart |
+| POST | `/api/v1/clusters/{cluster}/heartbeat` | Receive health report from a cluster agent |
+
+### Register cluster
+
+```bash
+curl -X POST http://localhost:8080/api/v1/clusters \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "workload-west",
+    "displayName": "Workload US-West-2",
+    "region": "us-west-2",
+    "environment": "production",
+    "kubeconfig": "<kubeconfig-file-contents>",
+    "ngfEdition": "enterprise"
+  }'
+```
+
+Response (201):
+```json
+{"message": "cluster registered", "name": "workload-west"}
+```
+
+Cluster names must be valid DNS subdomains: lowercase alphanumeric and hyphens, 1-63 characters, starting and ending with alphanumeric. Request body is limited to 1MB.
+
+### List clusters
+
+```bash
+curl http://localhost:8080/api/v1/clusters
+```
+
+In file-based mode, returns:
+```json
+[{"name": "production", "displayName": "Production US-East", "connected": true, "edition": "enterprise", "default": true}]
+```
+
+In CRD-based mode, returns extended detail:
+```json
+[{
+  "name": "workload-west",
+  "displayName": "Workload US-West-2",
+  "region": "us-west-2",
+  "environment": "production",
+  "connected": true,
+  "edition": "enterprise",
+  "default": false,
+  "kubernetesVersion": "1.30.2",
+  "ngfVersion": "1.6.2",
+  "agentInstalled": true,
+  "lastHeartbeat": "2024-01-15T10:30:00Z",
+  "resourceCounts": {"gateways": 3, "httpRoutes": 12},
+  "gpuCapacity": {"totalGPUs": 8, "allocatedGPUs": 6},
+  "isLocal": false
+}]
+```
+
+### Cluster summary
+
+```bash
+curl http://localhost:8080/api/v1/clusters/summary
+```
+
+Response:
+```json
+{
+  "totalClusters": 3,
+  "healthyClusters": 2,
+  "totalGateways": 8,
+  "totalRoutes": 24,
+  "totalGPUs": 16
+}
+```
+
+### Heartbeat
+
+Sent by the agent heartbeat reporter every 30 seconds. Request body is limited to 64KB.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/clusters/workload-west/heartbeat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "kubernetesVersion": "1.30.2",
+    "ngfVersion": "1.6.2",
+    "resourceCounts": {"gateways": 3, "httpRoutes": 12, "inferencePools": 2},
+    "gpuCapacity": {"totalGPUs": 8, "allocatedGPUs": 6, "gpuTypes": {"H100": 4, "A100": 4}}
+  }'
+```
+
+### Agent install command
+
+```bash
+curl -X POST http://localhost:8080/api/v1/clusters/workload-west/install-agent
+```
+
+Response:
+```json
+{
+  "helmCommand": "helm install ngf-console-agent charts/ngf-console-agent --namespace ngf-system --create-namespace --set cluster.name=\"workload-west\" --set hub.apiEndpoint=\"hub.example.com\" --set hub.otelEndpoint=\"hub.example.com:4317\"",
+  "clusterName": "workload-west"
+}
+```
+
+## Global Cross-Cluster Aggregation
+
+Endpoints that query all registered clusters in parallel and return combined results. Each result is wrapped with `clusterName` and `clusterRegion` metadata. Per-cluster queries have a 10-second timeout.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/global/gateways` | List gateways from all clusters |
+| GET | `/api/v1/global/routes` | List HTTP routes from all clusters |
+| GET | `/api/v1/global/gpu-capacity` | Aggregated GPU capacity across all clusters |
+
+### Global gateways
+
+```bash
+curl http://localhost:8080/api/v1/global/gateways
+```
+
+Response:
+```json
+[
+  {
+    "clusterName": "hub",
+    "clusterRegion": "us-east-1",
+    "gateway": {"name": "main-gw", "namespace": "default", "listeners": [...]}
+  },
+  {
+    "clusterName": "workload-west",
+    "clusterRegion": "us-west-2",
+    "gateway": {"name": "inference-gw", "namespace": "inference", "listeners": [...]}
+  }
+]
+```
+
+Optional query parameter: `?namespace=default` to filter by namespace.
+
+### Global GPU capacity
+
+```bash
+curl http://localhost:8080/api/v1/global/gpu-capacity
+```
+
+Response:
+```json
+{
+  "totalGPUs": 16,
+  "allocatedGPUs": 12,
+  "clusters": [
+    {"clusterName": "hub", "clusterRegion": "us-east-1", "totalGPUs": 8, "allocatedGPUs": 6, "gpuTypes": {"H100": 4, "A100": 4}},
+    {"clusterName": "workload-west", "clusterRegion": "us-west-2", "totalGPUs": 8, "allocatedGPUs": 6, "gpuTypes": {"H100": 8}}
+  ]
+}
+```
 
 ## Gateway Classes
 
@@ -228,4 +388,13 @@ CRD-backed inference stack management via the operator.
 | `/api/v1/ws/inference/gpu-metrics` | ~2s | Per-pod GPU utilization |
 | `/api/v1/ws/inference/scaling-events` | ~15s | Autoscaling events |
 
-Connect with any WebSocket client. In dev mode, topics stream mock data.
+Connect with any WebSocket client. In dev mode, topics stream mock data. The client reconnects with exponential backoff (1s base, 30s max) on disconnection.
+
+## Request/Response Conventions
+
+- All responses are JSON with `Content-Type: application/json`
+- Error responses use `{"error": "message"}` format
+- Internal error details are logged server-side with `slog`; clients receive generic error messages
+- Request bodies are limited to 1MB (64KB for heartbeats)
+- Cluster names in URLs are validated against RFC 1123 DNS subdomain rules
+- The `X-Cluster` header can be used to specify the target cluster for legacy routes

@@ -3,6 +3,8 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -20,13 +22,29 @@ func MaxBodySize(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// CORSMiddleware adds permissive CORS headers for development.
-// In production this should be locked down to specific origins.
+// CORSMiddleware adds CORS headers. In production, set CORS_ALLOWED_ORIGINS
+// to a comma-separated list of allowed origins. Defaults to "*" for development.
 func CORSMiddleware(next http.Handler) http.Handler {
+	allowedOrigins := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if allowedOrigins == "" {
+		allowedOrigins = "*"
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if allowedOrigins == "*" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if origin != "" {
+			for _, allowed := range strings.Split(allowedOrigins, ",") {
+				if strings.TrimSpace(allowed) == origin {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Vary", "Origin")
+					break
+				}
+			}
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Request-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Request-ID, X-Cluster")
 		w.Header().Set("Access-Control-Max-Age", "3600")
 
 		if r.Method == http.MethodOptions {

@@ -141,6 +141,15 @@ ingress:
     enabled: true
     secretName: ngf-console-tls
 
+multiCluster:
+  enabled: false
+  hubClusterName: ""
+  namespace: ngf-system
+  otel:
+    externalPort: 4320
+    service:
+      type: ClusterIP
+
 serviceAccount:
   create: true
   name: ngf-console

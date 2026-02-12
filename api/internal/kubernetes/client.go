@@ -102,6 +102,34 @@ func NewFromContext(kubeconfigPath, contextName string) (*Client, error) {
 	return &Client{client: c, dynamicClient: dc}, nil
 }
 
+// NewFromRestConfig creates a new Kubernetes client from an existing rest.Config.
+// This supports multi-cluster configurations where kubeconfig is parsed externally.
+func NewFromRestConfig(cfg *rest.Config) (*Client, error) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("adding client-go scheme: %w", err)
+	}
+	if err := gatewayv1.Install(scheme); err != nil {
+		return nil, fmt.Errorf("adding gateway-api scheme: %w", err)
+	}
+	if err := apiextensionsv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("adding apiextensions scheme: %w", err)
+	}
+
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("creating controller-runtime client: %w", err)
+	}
+
+	dc, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating dynamic client: %w", err)
+	}
+
+	slog.Info("kubernetes client initialized", "host", cfg.Host)
+	return &Client{client: c, dynamicClient: dc}, nil
+}
+
 func resolveConfig(kubeconfig string) (*rest.Config, error) {
 	// Try in-cluster first.
 	if cfg, err := rest.InClusterConfig(); err == nil {

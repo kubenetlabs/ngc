@@ -1,0 +1,192 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: managedclusters.ngf-console.f5.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+spec:
+  group: ngf-console.f5.com
+  names:
+    kind: ManagedCluster
+    listKind: ManagedClusterList
+    plural: managedclusters
+    singular: managedcluster
+    shortNames:
+      - mc
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Display Name
+          type: string
+          jsonPath: .spec.displayName
+        - name: Region
+          type: string
+          jsonPath: .spec.region
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        - name: NGF
+          type: string
+          jsonPath: .status.ngfVersion
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: ManagedCluster represents a Kubernetes cluster managed by the NGF Console hub.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: ManagedClusterSpec defines the desired state of a ManagedCluster.
+              required:
+                - displayName
+              properties:
+                displayName:
+                  type: string
+                  description: Human-readable name shown in the UI.
+                region:
+                  type: string
+                  description: Cloud provider region (e.g., "us-east-1").
+                environment:
+                  type: string
+                  description: Cluster environment classification (e.g., "production", "staging", "gpu").
+                labels:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Additional key-value labels for filtering.
+                kubeconfigSecretRef:
+                  type: object
+                  description: Reference to a Secret containing the kubeconfig for connecting to this cluster.
+                  properties:
+                    name:
+                      type: string
+                  required:
+                    - name
+                prometheusSecretRef:
+                  type: object
+                  description: Reference to a Secret containing the Prometheus URL for this cluster.
+                  properties:
+                    name:
+                      type: string
+                  required:
+                    - name
+                isLocal:
+                  type: boolean
+                  description: Indicates this cluster is the hub cluster itself (uses in-cluster config).
+                ngfEdition:
+                  type: string
+                  description: Expected NGF edition ("oss" or "enterprise").
+                  enum:
+                    - oss
+                    - enterprise
+                agentConfig:
+                  type: object
+                  description: Optional overrides for the agent running in this cluster.
+                  properties:
+                    heartbeatIntervalSeconds:
+                      type: integer
+                      format: int32
+                    otelEndpoint:
+                      type: string
+            status:
+              type: object
+              description: ManagedClusterStatus defines the observed state of a ManagedCluster.
+              properties:
+                phase:
+                  type: string
+                  description: Aggregate lifecycle phase.
+                  enum:
+                    - Pending
+                    - Connecting
+                    - Ready
+                    - Degraded
+                    - Unreachable
+                    - Terminating
+                kubernetesVersion:
+                  type: string
+                  description: Cluster K8s server version.
+                ngfVersion:
+                  type: string
+                  description: NGINX Gateway Fabric version installed.
+                agentInstalled:
+                  type: boolean
+                  description: Whether the NGF Console agent is running.
+                lastHeartbeat:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last successful agent heartbeat.
+                resourceCounts:
+                  type: object
+                  description: Key resource counts in this cluster.
+                  properties:
+                    gateways:
+                      type: integer
+                      format: int32
+                    httpRoutes:
+                      type: integer
+                      format: int32
+                    inferencePools:
+                      type: integer
+                      format: int32
+                    inferenceStacks:
+                      type: integer
+                      format: int32
+                    gatewayBundles:
+                      type: integer
+                      format: int32
+                    services:
+                      type: integer
+                      format: int32
+                    namespaces:
+                      type: integer
+                      format: int32
+                gpuCapacity:
+                  type: object
+                  description: Aggregate GPU information.
+                  properties:
+                    totalGPUs:
+                      type: integer
+                      format: int32
+                    allocatedGPUs:
+                      type: integer
+                      format: int32
+                    gpuTypes:
+                      type: object
+                      additionalProperties:
+                        type: integer
+                        format: int32
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
