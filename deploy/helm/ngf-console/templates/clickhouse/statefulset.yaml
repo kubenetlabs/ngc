@@ -33,6 +33,10 @@ spec:
               mountPath: /var/lib/clickhouse
             - name: schema
               mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: schema
+          configMap:
+            name: {{ include "ngf-console.fullname" . }}-clickhouse-schema
   volumeClaimTemplates:
     - metadata:
         name: data
