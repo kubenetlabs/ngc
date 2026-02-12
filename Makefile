@@ -1,7 +1,7 @@
 .PHONY: all build test lint dev clean docker-build docker-push helm-package helm-install helm-template build-agent-heartbeat docker-build-agent-heartbeat docker-build-agent helm-package-agent
 
 VERSION ?= 0.1.0
-REGISTRY ?= registry.f5.com/ngf-console
+REGISTRY ?= danny2guns
 DOCKER_COMPOSE := docker compose -f deploy/docker-compose/docker-compose.yaml
 
 # ──────────────────────────────────────────────
@@ -47,27 +47,28 @@ build-agent-heartbeat:
 docker-build: docker-build-frontend docker-build-api docker-build-operator docker-build-migration-cli docker-build-agent
 
 docker-build-frontend:
-	docker build -t $(REGISTRY)/frontend:$(VERSION) frontend/
+	docker build -t $(REGISTRY)/ngf-console-frontend:$(VERSION) frontend/
 
 docker-build-api:
-	docker build -t $(REGISTRY)/api:$(VERSION) api/
+	docker build -t $(REGISTRY)/ngf-console-api:$(VERSION) api/
 
 docker-build-operator:
-	docker build -t $(REGISTRY)/operator:$(VERSION) operator/
+	docker build -t $(REGISTRY)/ngf-console-operator:$(VERSION) operator/
 
 docker-build-migration-cli:
-	docker build -t $(REGISTRY)/migration:$(VERSION) migration-cli/
+	docker build -t $(REGISTRY)/ngf-console-migration:$(VERSION) migration-cli/
 
 docker-build-agent-heartbeat:
-	docker build -t $(REGISTRY)/agent-heartbeat:$(VERSION) -f agent/Dockerfile.heartbeat agent/
+	docker build -t $(REGISTRY)/ngf-console-agent-heartbeat:$(VERSION) -f agent/Dockerfile.heartbeat agent/
 
 docker-build-agent: docker-build-agent-heartbeat
 
 docker-push:
-	docker push $(REGISTRY)/frontend:$(VERSION)
-	docker push $(REGISTRY)/api:$(VERSION)
-	docker push $(REGISTRY)/operator:$(VERSION)
-	docker push $(REGISTRY)/migration:$(VERSION)
+	docker push $(REGISTRY)/ngf-console-frontend:$(VERSION)
+	docker push $(REGISTRY)/ngf-console-api:$(VERSION)
+	docker push $(REGISTRY)/ngf-console-operator:$(VERSION)
+	docker push $(REGISTRY)/ngf-console-migration:$(VERSION)
+	docker push $(REGISTRY)/ngf-console-agent-heartbeat:$(VERSION)
 
 # ──────────────────────────────────────────────
 # Helm
