@@ -5,6 +5,12 @@
 ALTER TABLE ngf_access_logs ADD COLUMN IF NOT EXISTS cluster_name LowCardinality(String) DEFAULT '' AFTER timestamp;
 ALTER TABLE ngf_inference_logs ADD COLUMN IF NOT EXISTS cluster_name LowCardinality(String) DEFAULT '' AFTER timestamp;
 
+-- Add cluster_name to metadata tables (seed data).
+ALTER TABLE ngf_inference_pools ADD COLUMN IF NOT EXISTS cluster_name LowCardinality(String) DEFAULT '' AFTER name;
+ALTER TABLE ngf_epp_decisions ADD COLUMN IF NOT EXISTS cluster_name LowCardinality(String) DEFAULT '' AFTER pool_name;
+ALTER TABLE ngf_pod_metrics ADD COLUMN IF NOT EXISTS cluster_name LowCardinality(String) DEFAULT '' AFTER pool_name;
+ALTER TABLE ngf_inference_metrics_1m ADD COLUMN IF NOT EXISTS cluster_name LowCardinality(String) DEFAULT '' AFTER pool_name;
+
 -- Drop and recreate materialized views to include cluster_name.
 -- Uses AggregatingMergeTree with -State combinators for correct avg/quantile merging.
 DROP VIEW IF EXISTS ngf_metrics_1m;

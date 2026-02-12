@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	ch "github.com/kubenetlabs/ngc/api/internal/clickhouse"
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
 )
 
 // LogHandler handles log query API requests.
@@ -58,6 +59,13 @@ func (h *LogHandler) Query(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT timestamp, method, path, status, latency_ms, upstream_name, namespace, route FROM ngf_access_logs WHERE 1=1`
 	args := []interface{}{}
+
+	// Filter by cluster when a cluster is selected (empty string matches all).
+	cn := cluster.ClusterNameFromContext(r.Context())
+	if cn != "" {
+		query += ` AND cluster_name = ?`
+		args = append(args, cn)
+	}
 
 	if req.Namespace != "" {
 		query += ` AND namespace = ?`
@@ -128,9 +136,18 @@ func (h *LogHandler) TopN(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	query := `SELECT ` + field + ` AS key, count() AS cnt, cnt * 100.0 / sum(cnt) OVER () AS pct FROM ngf_access_logs WHERE timestamp >= now() - INTERVAL 1 HOUR GROUP BY key ORDER BY cnt DESC LIMIT ?`
+	cn := cluster.ClusterNameFromContext(r.Context())
+	clusterFilter := ""
+	args := []interface{}{}
+	if cn != "" {
+		clusterFilter = ` AND cluster_name = ?`
+		args = append(args, cn)
+	}
 
-	rows, err := h.CH.Conn().Query(r.Context(), query, n)
+	query := `SELECT ` + field + ` AS key, count() AS cnt, cnt * 100.0 / sum(cnt) OVER () AS pct FROM ngf_access_logs WHERE timestamp >= now() - INTERVAL 1 HOUR` + clusterFilter + ` GROUP BY key ORDER BY cnt DESC LIMIT ?`
+	args = append(args, n)
+
+	rows, err := h.CH.Conn().Query(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed: "+err.Error())
 		return

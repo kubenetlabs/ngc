@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
 	prom "github.com/kubenetlabs/ngc/api/internal/prometheus"
 )
 
@@ -19,7 +20,8 @@ func (h *MetricsHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summary, err := h.Prom.Summary(r.Context(), time.Now())
+	cn := cluster.ClusterNameFromContext(r.Context())
+	summary, err := h.Prom.Summary(r.Context(), time.Now(), cn)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -34,7 +36,8 @@ func (h *MetricsHandler) ByRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	routes, err := h.Prom.ByRoute(r.Context(), time.Now())
+	cn := cluster.ClusterNameFromContext(r.Context())
+	routes, err := h.Prom.ByRoute(r.Context(), time.Now(), cn)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -52,7 +55,8 @@ func (h *MetricsHandler) ByGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gateways, err := h.Prom.ByGateway(r.Context(), time.Now())
+	cn := cluster.ClusterNameFromContext(r.Context())
+	gateways, err := h.Prom.ByGateway(r.Context(), time.Now(), cn)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

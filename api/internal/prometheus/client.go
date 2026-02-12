@@ -58,42 +58,53 @@ type GatewayMetrics struct {
 	ActiveConnections float64 `json:"activeConnections"`
 }
 
-// Summary returns aggregated RED metrics.
-func (c *Client) Summary(ctx context.Context, end time.Time) (*MetricsSummary, error) {
-	summary := &MetricsSummary{}
+// clusterSelector returns a PromQL label selector for the given cluster.
+// Returns "" when clusterName is empty (matches all clusters).
+func clusterSelector(clusterName string) string {
+	if clusterName == "" {
+		return ""
+	}
+	return fmt.Sprintf(`cluster_name="%s",`, clusterName)
+}
 
-	if val, err := c.queryScalar(ctx, `sum(rate(nginx_gateway_fabric_http_requests_total[5m]))`, end); err == nil {
+// Summary returns aggregated RED metrics, optionally filtered by cluster.
+func (c *Client) Summary(ctx context.Context, end time.Time, clusterName string) (*MetricsSummary, error) {
+	summary := &MetricsSummary{}
+	cs := clusterSelector(clusterName)
+
+	if val, err := c.queryScalar(ctx, fmt.Sprintf(`sum(rate(nginx_gateway_fabric_http_requests_total{%s}[5m]))`, cs), end); err == nil {
 		summary.RequestsPerSec = val
 	}
 
-	if val, err := c.queryScalar(ctx, `sum(rate(nginx_gateway_fabric_http_requests_total{status=~"5.."}[5m])) / sum(rate(nginx_gateway_fabric_http_requests_total[5m]))`, end); err == nil {
+	if val, err := c.queryScalar(ctx, fmt.Sprintf(`sum(rate(nginx_gateway_fabric_http_requests_total{%sstatus=~"5.."}[5m])) / sum(rate(nginx_gateway_fabric_http_requests_total{%s}[5m]))`, cs, cs), end); err == nil {
 		summary.ErrorRate = val
 	}
 
-	if val, err := c.queryScalar(ctx, `histogram_quantile(0.50, sum(rate(nginx_gateway_fabric_http_request_duration_seconds_bucket[5m])) by (le)) * 1000`, end); err == nil {
+	if val, err := c.queryScalar(ctx, fmt.Sprintf(`histogram_quantile(0.50, sum(rate(nginx_gateway_fabric_http_request_duration_seconds_bucket{%s}[5m])) by (le)) * 1000`, cs), end); err == nil {
 		summary.P50LatencyMs = val
 		summary.AvgLatencyMs = val
 	}
 
-	if val, err := c.queryScalar(ctx, `histogram_quantile(0.95, sum(rate(nginx_gateway_fabric_http_request_duration_seconds_bucket[5m])) by (le)) * 1000`, end); err == nil {
+	if val, err := c.queryScalar(ctx, fmt.Sprintf(`histogram_quantile(0.95, sum(rate(nginx_gateway_fabric_http_request_duration_seconds_bucket{%s}[5m])) by (le)) * 1000`, cs), end); err == nil {
 		summary.P95LatencyMs = val
 	}
 
-	if val, err := c.queryScalar(ctx, `histogram_quantile(0.99, sum(rate(nginx_gateway_fabric_http_request_duration_seconds_bucket[5m])) by (le)) * 1000`, end); err == nil {
+	if val, err := c.queryScalar(ctx, fmt.Sprintf(`histogram_quantile(0.99, sum(rate(nginx_gateway_fabric_http_request_duration_seconds_bucket{%s}[5m])) by (le)) * 1000`, cs), end); err == nil {
 		summary.P99LatencyMs = val
 	}
 
-	if val, err := c.queryScalar(ctx, `sum(nginx_gateway_fabric_connections_active)`, end); err == nil {
+	if val, err := c.queryScalar(ctx, fmt.Sprintf(`sum(nginx_gateway_fabric_connections_active{%s})`, cs), end); err == nil {
 		summary.ActiveConnections = val
 	}
 
 	return summary, nil
 }
 
-// ByRoute returns per-route RED metrics.
-func (c *Client) ByRoute(ctx context.Context, end time.Time) ([]RouteMetrics, error) {
+// ByRoute returns per-route RED metrics, optionally filtered by cluster.
+func (c *Client) ByRoute(ctx context.Context, end time.Time, clusterName string) ([]RouteMetrics, error) {
+	cs := clusterSelector(clusterName)
 	result, _, err := c.api.Query(ctx,
-		`sum by (httproute_namespace, httproute_name, hostname) (rate(nginx_gateway_fabric_http_requests_total[5m]))`,
+		fmt.Sprintf(`sum by (httproute_namespace, httproute_name, hostname) (rate(nginx_gateway_fabric_http_requests_total{%s}[5m]))`, cs),
 		end,
 	)
 	if err != nil {
@@ -117,10 +128,11 @@ func (c *Client) ByRoute(ctx context.Context, end time.Time) ([]RouteMetrics, er
 	return routes, nil
 }
 
-// ByGateway returns per-gateway metrics.
-func (c *Client) ByGateway(ctx context.Context, end time.Time) ([]GatewayMetrics, error) {
+// ByGateway returns per-gateway metrics, optionally filtered by cluster.
+func (c *Client) ByGateway(ctx context.Context, end time.Time, clusterName string) ([]GatewayMetrics, error) {
+	cs := clusterSelector(clusterName)
 	result, _, err := c.api.Query(ctx,
-		`sum by (gateway_namespace, gateway_name) (rate(nginx_gateway_fabric_http_requests_total[5m]))`,
+		fmt.Sprintf(`sum by (gateway_namespace, gateway_name) (rate(nginx_gateway_fabric_http_requests_total{%s}[5m]))`, cs),
 		end,
 	)
 	if err != nil {

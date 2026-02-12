@@ -4,6 +4,7 @@
 -- Pool metadata
 CREATE TABLE IF NOT EXISTS ngf_inference_pools (
     name String,
+    cluster_name LowCardinality(String) DEFAULT '',
     namespace String,
     model_name String,
     model_version String,
@@ -16,7 +17,7 @@ CREATE TABLE IF NOT EXISTS ngf_inference_pools (
     max_replicas UInt32,
     status String,
     created_at DateTime
-) ENGINE = MergeTree() ORDER BY name;
+) ENGINE = MergeTree() ORDER BY (cluster_name, name);
 
 INSERT INTO ngf_inference_pools VALUES
     ('llama3-70b-prod', 'inference', 'meta-llama/Llama-3-70B-Instruct', 'v1.2', 'vllm', 'H100', 4, 6, 6, 2, 12, 'Ready', now() - INTERVAL 72 HOUR),
@@ -28,6 +29,7 @@ INSERT INTO ngf_inference_pools VALUES
 CREATE TABLE IF NOT EXISTS ngf_epp_decisions (
     timestamp DateTime,
     pool_name String,
+    cluster_name LowCardinality(String) DEFAULT '',
     request_id String,
     selected_pod String,
     reason String,
@@ -36,7 +38,7 @@ CREATE TABLE IF NOT EXISTS ngf_epp_decisions (
     prefix_cache_hit UInt8,
     candidates_considered UInt32,
     decision_latency_us UInt32
-) ENGINE = MergeTree() ORDER BY (pool_name, timestamp);
+) ENGINE = MergeTree() ORDER BY (cluster_name, pool_name, timestamp);
 
 INSERT INTO ngf_epp_decisions
 SELECT
@@ -55,6 +57,7 @@ FROM numbers(500);
 -- Pod metrics (latest snapshot)
 CREATE TABLE IF NOT EXISTS ngf_pod_metrics (
     pool_name String,
+    cluster_name LowCardinality(String) DEFAULT '',
     pod_name String,
     node_name String,
     gpu_id UInt32,
@@ -67,7 +70,7 @@ CREATE TABLE IF NOT EXISTS ngf_pod_metrics (
     gpu_mem_total_mb UInt32,
     gpu_temperature_c UInt32,
     requests_in_flight UInt32
-) ENGINE = MergeTree() ORDER BY (pool_name, pod_name);
+) ENGINE = MergeTree() ORDER BY (cluster_name, pool_name, pod_name);
 
 INSERT INTO ngf_pod_metrics
 SELECT
@@ -90,6 +93,7 @@ FROM numbers(6);
 CREATE TABLE IF NOT EXISTS ngf_inference_metrics_1m (
     timestamp DateTime,
     pool_name String,
+    cluster_name LowCardinality(String) DEFAULT '',
     ttft_ms Float64,
     tps Float64,
     total_tokens UInt64,
@@ -97,7 +101,7 @@ CREATE TABLE IF NOT EXISTS ngf_inference_metrics_1m (
     kv_cache_pct Float64,
     prefix_cache_hit UInt8,
     gpu_util_pct Float64
-) ENGINE = MergeTree() ORDER BY (pool_name, timestamp);
+) ENGINE = MergeTree() ORDER BY (cluster_name, pool_name, timestamp);
 
 INSERT INTO ngf_inference_metrics_1m
 SELECT
