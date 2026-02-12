@@ -1,0 +1,233 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: inferencestacks.ngf-console.f5.com
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+spec:
+  group: ngf-console.f5.com
+  names:
+    kind: InferenceStack
+    listKind: InferenceStackList
+    plural: inferencestacks
+    singular: inferencestack
+    shortNames:
+      - istack
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Model
+          type: string
+          jsonPath: .spec.modelName
+        - name: Backend
+          type: string
+          jsonPath: .spec.servingBackend
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: InferenceStack declares a complete inference serving stack.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required:
+                - modelName
+                - servingBackend
+                - pool
+              properties:
+                modelName:
+                  type: string
+                  description: HuggingFace model identifier.
+                modelVersion:
+                  type: string
+                servingBackend:
+                  type: string
+                  enum: ["vllm", "triton", "tgi"]
+                pool:
+                  type: object
+                  required:
+                    - gpuType
+                    - gpuCount
+                    - replicas
+                  properties:
+                    gpuType:
+                      type: string
+                    gpuCount:
+                      type: integer
+                      format: int32
+                    replicas:
+                      type: integer
+                      format: int32
+                    minReplicas:
+                      type: integer
+                      format: int32
+                    maxReplicas:
+                      type: integer
+                      format: int32
+                    selector:
+                      type: object
+                      additionalProperties:
+                        type: string
+                epp:
+                  type: object
+                  properties:
+                    strategy:
+                      type: string
+                      enum: ["least_queue", "kv_cache", "prefix_affinity", "composite"]
+                    weights:
+                      type: object
+                      properties:
+                        queueDepth:
+                          type: integer
+                          format: int32
+                        kvCache:
+                          type: integer
+                          format: int32
+                        prefixAffinity:
+                          type: integer
+                          format: int32
+                autoscaling:
+                  type: object
+                  properties:
+                    backend:
+                      type: string
+                      enum: ["keda", "hpa"]
+                    thresholds:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          metric:
+                            type: string
+                          target:
+                            type: integer
+                            format: int32
+                    cooldownSeconds:
+                      type: integer
+                      format: int32
+                httpRoute:
+                  type: object
+                  properties:
+                    hostnames:
+                      type: array
+                      items:
+                        type: string
+                    gatewayRef:
+                      type: string
+                    gatewayNamespace:
+                      type: string
+                dcgm:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                    image:
+                      type: string
+                distributedCloud:
+                  type: object
+                  properties:
+                    tenant:
+                      type: string
+                    namespace:
+                      type: string
+                    publicHostname:
+                      type: string
+                    wafPolicy:
+                      type: string
+                    botDefense:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                    ddosProtection:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                    tls:
+                      type: object
+                      properties:
+                        secretRef:
+                          type: string
+                    originPool:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                    rateLimiting:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                        requestsPerUnit:
+                          type: integer
+                          format: int32
+                        unit:
+                          type: string
+                    multiRegion:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                        regions:
+                          type: array
+                          items:
+                            type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                children:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      kind:
+                        type: string
+                      name:
+                        type: string
+                      ready:
+                        type: boolean
+                      message:
+                        type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                observedSpecHash:
+                  type: string
+                lastReconciledAt:
+                  type: string
+                  format: date-time

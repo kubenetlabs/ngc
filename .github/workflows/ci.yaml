@@ -81,10 +81,28 @@ jobs:
         with:
           working-directory: migration-cli
 
+  operator:
+    name: Operator
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: operator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: operator/go.sum
+      - run: go build ./...
+      - run: go test ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: operator
+
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
-    needs: [frontend, api, controller, migration-cli]
+    needs: [frontend, api, controller, migration-cli, operator]
     steps:
       - uses: actions/checkout@v4
       - name: Build frontend image
@@ -93,5 +111,7 @@ jobs:
         run: docker build -t ngf-console-api:ci api/
       - name: Build controller image
         run: docker build -t ngf-console-controller:ci controller/
+      - name: Build operator image
+        run: docker build -t ngf-console-operator:ci operator/
       - name: Build migration CLI image
         run: docker build -t ngf-console-migration:ci migration-cli/

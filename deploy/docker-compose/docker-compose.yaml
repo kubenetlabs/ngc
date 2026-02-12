@@ -32,7 +32,8 @@ services:
       - "9000:9000"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
-      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./clickhouse/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest

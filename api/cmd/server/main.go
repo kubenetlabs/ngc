@@ -1,15 +1,20 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
+	"github.com/kubenetlabs/ngc/api/internal/alerting"
 	chprovider "github.com/kubenetlabs/ngc/api/internal/clickhouse"
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/database"
 	"github.com/kubenetlabs/ngc/api/internal/inference"
 	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
+	prom "github.com/kubenetlabs/ngc/api/internal/prometheus"
 	"github.com/kubenetlabs/ngc/api/internal/server"
 	"github.com/kubenetlabs/ngc/api/pkg/version"
 )
@@ -20,6 +25,9 @@ func main() {
 	clustersConfig := flag.String("clusters-config", "", "Path to clusters YAML config (enables multi-cluster)")
 	dbType := flag.String("db-type", "mock", "Metrics provider backend (mock, clickhouse)")
 	clickhouseURL := flag.String("clickhouse-url", "localhost:9000", "ClickHouse connection URL")
+	prometheusURL := flag.String("prometheus-url", "", "Prometheus server URL (e.g., http://prometheus:9090)")
+	configDB := flag.String("config-db", "ngf-console.db", "Path to SQLite config database")
+	alertWebhooks := flag.String("alert-webhooks", "", "Comma-separated webhook URLs for alert notifications")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
 
@@ -65,23 +73,67 @@ func main() {
 
 	// Initialize metrics provider (mock for dev, ClickHouse for prod)
 	var metricsProvider inference.MetricsProvider
+	var chClient *chprovider.Client
 	if *dbType == "clickhouse" && *clickhouseURL != "" {
-		chClient, err := chprovider.New(*clickhouseURL)
+		var err error
+		chClient, err = chprovider.New(*clickhouseURL)
 		if err != nil {
-			slog.Warn("failed to create clickhouse client, falling back to mock", "error", err)
-			metricsProvider = inference.NewMockProvider()
-		} else {
-			metricsProvider = chprovider.NewProvider(chClient)
-			slog.Info("using clickhouse metrics provider", "url", *clickhouseURL)
+			slog.Error("failed to create clickhouse client (explicitly configured)", "error", err)
+			os.Exit(1)
 		}
+		metricsProvider = chprovider.NewProvider(chClient)
+		slog.Info("using clickhouse metrics provider", "url", *clickhouseURL)
 	} else {
 		metricsProvider = inference.NewMockProvider()
 		slog.Info("using mock metrics provider")
 	}
 
+	// Initialize Prometheus client if configured.
+	var promClient *prom.Client
+	if *prometheusURL != "" {
+		var err error
+		promClient, err = prom.New(*prometheusURL)
+		if err != nil {
+			slog.Error("failed to create prometheus client", "error", err, "url", *prometheusURL)
+			os.Exit(1)
+		}
+		slog.Info("prometheus client configured", "url", *prometheusURL)
+	} else {
+		slog.Info("prometheus not configured, RED metrics endpoints will return 503")
+	}
+
+	// Initialize config database (SQLite).
+	store, err := database.NewSQLite(*configDB)
+	if err != nil {
+		slog.Error("failed to open config database", "error", err, "path", *configDB)
+		os.Exit(1)
+	}
+	defer store.Close()
+	if err := store.Migrate(context.Background()); err != nil {
+		slog.Error("failed to migrate config database", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("config database ready", "path", *configDB)
+
+	// Parse alert webhook URLs.
+	var webhooks []alerting.WebhookConfig
+	if *alertWebhooks != "" {
+		for _, url := range strings.Split(*alertWebhooks, ",") {
+			url = strings.TrimSpace(url)
+			if url != "" {
+				webhooks = append(webhooks, alerting.WebhookConfig{URL: url})
+			}
+		}
+		slog.Info("alert webhooks configured", "count", len(webhooks))
+	}
+
 	srv := server.New(server.Config{
 		ClusterManager:  mgr,
 		MetricsProvider: metricsProvider,
+		Store:           store,
+		PromClient:      promClient,
+		CHClient:        chClient,
+		Webhooks:        webhooks,
 	})
 
 	addr := fmt.Sprintf(":%d", *port)

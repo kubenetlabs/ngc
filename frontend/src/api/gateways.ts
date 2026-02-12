@@ -1,5 +1,5 @@
 import apiClient from "./client";
-import type { Gateway, GatewayClass, CreateGatewayPayload, UpdateGatewayPayload } from "@/types/gateway";
+import type { Gateway, GatewayClass, CreateGatewayPayload, UpdateGatewayPayload, GatewayBundle, CreateGatewayBundlePayload } from "@/types/gateway";
 
 export async function fetchGateways(namespace?: string): Promise<Gateway[]> {
   const params = namespace ? { namespace } : {};
@@ -34,4 +34,31 @@ export async function updateGateway(namespace: string, name: string, payload: Up
 
 export async function deleteGateway(namespace: string, name: string): Promise<void> {
   await apiClient.delete(`/gateways/${namespace}/${name}`);
+}
+
+// --- GatewayBundle API ---
+
+export async function fetchGatewayBundles(namespace?: string): Promise<GatewayBundle[]> {
+  const params = namespace ? { namespace } : {};
+  const { data } = await apiClient.get<GatewayBundle[]>("/gatewaybundles", { params });
+  return data;
+}
+
+export async function fetchGatewayBundle(namespace: string, name: string): Promise<GatewayBundle> {
+  const { data } = await apiClient.get<GatewayBundle>(`/gatewaybundles/${namespace}/${name}`);
+  return data;
+}
+
+export async function createGatewayBundle(payload: CreateGatewayBundlePayload): Promise<GatewayBundle> {
+  const { data } = await apiClient.post<GatewayBundle>("/gatewaybundles", payload);
+  return data;
+}
+
+export async function updateGatewayBundle(namespace: string, name: string, payload: Partial<CreateGatewayBundlePayload>): Promise<GatewayBundle> {
+  const { data } = await apiClient.put<GatewayBundle>(`/gatewaybundles/${namespace}/${name}`, payload);
+  return data;
+}
+
+export async function deleteGatewayBundle(namespace: string, name: string): Promise<void> {
+  await apiClient.delete(`/gatewaybundles/${namespace}/${name}`);
 }

@@ -38,7 +38,7 @@ export function ClusterSelector() {
       >
         {clusters.map((c) => (
           <option key={c.name} value={c.name}>
-            <span>{c.displayName || c.name}</span>
+            {c.displayName || c.name}
           </option>
         ))}
       </select>

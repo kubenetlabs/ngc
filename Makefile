@@ -23,7 +23,7 @@ dev-compose:
 # Build
 # ──────────────────────────────────────────────
 
-build: build-frontend build-api build-controller build-migration-cli
+build: build-frontend build-api build-operator build-migration-cli
 
 build-frontend:
 	cd frontend && pnpm install && pnpm build
@@ -31,8 +31,8 @@ build-frontend:
 build-api:
 	cd api && go build -o bin/api-server ./cmd/server
 
-build-controller:
-	cd controller && go build -o bin/controller .
+build-operator:
+	cd operator && go build -o bin/operator ./cmd/
 
 build-migration-cli:
 	cd migration-cli && go build -o bin/ngf-migrate .
@@ -41,7 +41,7 @@ build-migration-cli:
 # Docker
 # ──────────────────────────────────────────────
 
-docker-build: docker-build-frontend docker-build-api docker-build-controller docker-build-migration-cli
+docker-build: docker-build-frontend docker-build-api docker-build-operator docker-build-migration-cli
 
 docker-build-frontend:
 	docker build -t $(REGISTRY)/frontend:$(VERSION) frontend/
@@ -49,8 +49,8 @@ docker-build-frontend:
 docker-build-api:
 	docker build -t $(REGISTRY)/api:$(VERSION) api/
 
-docker-build-controller:
-	docker build -t $(REGISTRY)/controller:$(VERSION) controller/
+docker-build-operator:
+	docker build -t $(REGISTRY)/operator:$(VERSION) operator/
 
 docker-build-migration-cli:
 	docker build -t $(REGISTRY)/migration:$(VERSION) migration-cli/
@@ -58,7 +58,7 @@ docker-build-migration-cli:
 docker-push:
 	docker push $(REGISTRY)/frontend:$(VERSION)
 	docker push $(REGISTRY)/api:$(VERSION)
-	docker push $(REGISTRY)/controller:$(VERSION)
+	docker push $(REGISTRY)/operator:$(VERSION)
 	docker push $(REGISTRY)/migration:$(VERSION)
 
 # ──────────────────────────────────────────────
@@ -78,7 +78,7 @@ helm-template:
 # Test
 # ──────────────────────────────────────────────
 
-test: test-frontend test-api test-controller test-migration-cli
+test: test-frontend test-api test-operator test-migration-cli
 
 test-frontend:
 	cd frontend && pnpm test
@@ -86,8 +86,8 @@ test-frontend:
 test-api:
 	cd api && go test ./...
 
-test-controller:
-	cd controller && go test ./...
+test-operator:
+	cd operator && go test ./...
 
 test-migration-cli:
 	cd migration-cli && go test ./...
@@ -103,7 +103,7 @@ lint-frontend:
 
 lint-go:
 	cd api && golangci-lint run ./...
-	cd controller && golangci-lint run ./...
+	cd operator && golangci-lint run ./...
 	cd migration-cli && golangci-lint run ./...
 
 # ──────────────────────────────────────────────
@@ -113,11 +113,17 @@ lint-go:
 generate-manifests:
 	helm template ngf-console deploy/helm/ngf-console > deploy/manifests/install.yaml
 
+generate-crds:
+	cp operator/config/crd/bases/*.yaml deploy/helm/ngf-console/templates/crds/
+
+generate-deepcopy:
+	cd operator && go generate ./...
+
 # ──────────────────────────────────────────────
 # Clean
 # ──────────────────────────────────────────────
 
 clean:
 	rm -rf frontend/dist frontend/node_modules
-	rm -f api/bin/api-server controller/bin/controller migration-cli/bin/ngf-migrate
+	rm -f api/bin/api-server operator/bin/operator migration-cli/bin/ngf-migrate
 	$(DOCKER_COMPOSE) down -v

@@ -1,0 +1,52 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ngf-console-operator
+rules:
+  # InferenceStack CRD
+  - apiGroups: ["ngf-console.f5.com"]
+    resources: ["inferencestacks"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["ngf-console.f5.com"]
+    resources: ["inferencestacks/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["ngf-console.f5.com"]
+    resources: ["inferencestacks/finalizers"]
+    verbs: ["update"]
+  # DistributedCloudPublish CRD
+  - apiGroups: ["ngf-console.f5.com"]
+    resources: ["distributedcloudpublishes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["ngf-console.f5.com"]
+    resources: ["distributedcloudpublishes/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["ngf-console.f5.com"]
+    resources: ["distributedcloudpublishes/finalizers"]
+    verbs: ["update"]
+  # InferencePool (Gateway Inference Extension)
+  - apiGroups: ["inference.networking.x-k8s.io"]
+    resources: ["inferencepools"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Gateway API resources
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways", "httproutes", "gatewayclasses"]
+    verbs: ["get", "list", "watch"]
+  # Core resources
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Apps for DaemonSets (DCGM)
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # KEDA ScaledObject (Phase 2)
+  - apiGroups: ["keda.sh"]
+    resources: ["scaledobjects"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

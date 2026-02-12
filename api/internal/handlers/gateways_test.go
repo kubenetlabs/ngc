@@ -9,7 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakedynamic "k8s.io/client-go/dynamic/fake"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -323,13 +326,28 @@ func TestGatewayHandler_GetClass(t *testing.T) {
 	})
 }
 
+// newFakeDynamicClient creates a fake dynamic client with the GatewayBundle GVR registered.
+func newFakeDynamicClient(objects ...runtime.Object) *fakedynamic.FakeDynamicClient {
+	s := runtime.NewScheme()
+	s.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "ngf-console.f5.com", Version: "v1alpha1", Kind: "GatewayBundle"},
+		&unstructured.Unstructured{},
+	)
+	s.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "ngf-console.f5.com", Version: "v1alpha1", Kind: "GatewayBundleList"},
+		&unstructured.UnstructuredList{},
+	)
+	return fakedynamic.NewSimpleDynamicClient(s, objects...)
+}
+
 func TestGatewayHandler_Create(t *testing.T) {
 	scheme := setupScheme(t)
 	handler := &GatewayHandler{}
 
 	t.Run("successful create", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-		k8sClient := kubernetes.NewForTest(fakeClient)
+		dc := newFakeDynamicClient()
+		k8sClient := kubernetes.NewForTestWithDynamic(fakeClient, dc)
 
 		r := chi.NewRouter()
 		r.Use(contextMiddleware(k8sClient))
@@ -351,7 +369,7 @@ func TestGatewayHandler_Create(t *testing.T) {
 			t.Errorf("expected status 201, got %d: %s", w.Code, w.Body.String())
 		}
 
-		var resp GatewayResponse
+		var resp GatewayBundleResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -372,7 +390,8 @@ func TestGatewayHandler_Create(t *testing.T) {
 
 	t.Run("missing required fields", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-		k8sClient := kubernetes.NewForTest(fakeClient)
+		dc := newFakeDynamicClient()
+		k8sClient := kubernetes.NewForTestWithDynamic(fakeClient, dc)
 
 		r := chi.NewRouter()
 		r.Use(contextMiddleware(k8sClient))
@@ -392,7 +411,8 @@ func TestGatewayHandler_Create(t *testing.T) {
 
 	t.Run("invalid JSON", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-		k8sClient := kubernetes.NewForTest(fakeClient)
+		dc := newFakeDynamicClient()
+		k8sClient := kubernetes.NewForTestWithDynamic(fakeClient, dc)
 
 		r := chi.NewRouter()
 		r.Use(contextMiddleware(k8sClient))
@@ -415,20 +435,26 @@ func TestGatewayHandler_Update(t *testing.T) {
 	handler := &GatewayHandler{}
 
 	t.Run("successful update", func(t *testing.T) {
-		existing := &gatewayv1.Gateway{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-gw",
-				Namespace: "default",
-			},
-			Spec: gatewayv1.GatewaySpec{
-				GatewayClassName: "nginx",
-				Listeners: []gatewayv1.Listener{
-					{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
+		// Create an existing GatewayBundle as unstructured for the dynamic client.
+		existingBundle := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "ngf-console.f5.com/v1alpha1",
+				"kind":       "GatewayBundle",
+				"metadata": map[string]any{
+					"name":      "test-gw",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"gatewayClassName": "nginx",
+					"listeners": []any{
+						map[string]any{"name": "http", "port": int64(80), "protocol": "HTTP"},
+					},
 				},
 			},
 		}
-		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
-		k8sClient := kubernetes.NewForTest(fakeClient)
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		dc := newFakeDynamicClient(existingBundle)
+		k8sClient := kubernetes.NewForTestWithDynamic(fakeClient, dc)
 
 		r := chi.NewRouter()
 		r.Use(contextMiddleware(k8sClient))
@@ -451,7 +477,7 @@ func TestGatewayHandler_Update(t *testing.T) {
 			t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
 		}
 
-		var resp GatewayResponse
+		var resp GatewayBundleResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -463,7 +489,8 @@ func TestGatewayHandler_Update(t *testing.T) {
 
 	t.Run("nonexistent gateway", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-		k8sClient := kubernetes.NewForTest(fakeClient)
+		dc := newFakeDynamicClient()
+		k8sClient := kubernetes.NewForTestWithDynamic(fakeClient, dc)
 
 		r := chi.NewRouter()
 		r.Use(contextMiddleware(k8sClient))
@@ -490,20 +517,25 @@ func TestGatewayHandler_Delete(t *testing.T) {
 	handler := &GatewayHandler{}
 
 	t.Run("successful delete", func(t *testing.T) {
-		existing := &gatewayv1.Gateway{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-gw",
-				Namespace: "default",
-			},
-			Spec: gatewayv1.GatewaySpec{
-				GatewayClassName: "nginx",
-				Listeners: []gatewayv1.Listener{
-					{Name: "http", Port: 80, Protocol: gatewayv1.HTTPProtocolType},
+		existingBundle := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "ngf-console.f5.com/v1alpha1",
+				"kind":       "GatewayBundle",
+				"metadata": map[string]any{
+					"name":      "test-gw",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"gatewayClassName": "nginx",
+					"listeners": []any{
+						map[string]any{"name": "http", "port": int64(80), "protocol": "HTTP"},
+					},
 				},
 			},
 		}
-		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
-		k8sClient := kubernetes.NewForTest(fakeClient)
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		dc := newFakeDynamicClient(existingBundle)
+		k8sClient := kubernetes.NewForTestWithDynamic(fakeClient, dc)
 
 		r := chi.NewRouter()
 		r.Use(contextMiddleware(k8sClient))
@@ -530,7 +562,8 @@ func TestGatewayHandler_Delete(t *testing.T) {
 
 	t.Run("nonexistent gateway", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-		k8sClient := kubernetes.NewForTest(fakeClient)
+		dc := newFakeDynamicClient()
+		k8sClient := kubernetes.NewForTestWithDynamic(fakeClient, dc)
 
 		r := chi.NewRouter()
 		r.Use(contextMiddleware(k8sClient))

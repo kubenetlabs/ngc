@@ -145,9 +145,9 @@ func TestServer_Integration(t *testing.T) {
 			checkCORS:      true,
 		},
 		{
-			name:           "GET /api/v1/certificates (not implemented)",
+			name:           "GET /api/v1/certificates",
 			path:           "/api/v1/certificates",
-			expectedStatus: http.StatusNotImplemented,
+			expectedStatus: http.StatusOK,
 			checkJSON:      true,
 			checkCORS:      true,
 		},
@@ -308,43 +308,6 @@ func TestServer_CORSMiddleware(t *testing.T) {
 	})
 }
 
-func TestServer_NotImplementedEndpoints(t *testing.T) {
-	ts := setupTestServer(t)
-	defer ts.Close()
-
-	tests := []struct {
-		path   string
-		method string
-	}{
-		{"/api/v1/certificates", http.MethodGet},
-		{"/api/v1/metrics/summary", http.MethodGet},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			req, err := http.NewRequest(tt.method, ts.URL+tt.path, nil)
-			if err != nil {
-				t.Fatalf("failed to create request: %v", err)
-			}
-
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatalf("failed to make request: %v", err)
-			}
-			defer resp.Body.Close()
-
-			// These endpoints should return 501 Not Implemented
-			if resp.StatusCode != http.StatusNotImplemented {
-				t.Errorf("expected status 501, got %d", resp.StatusCode)
-			}
-
-			var result map[string]interface{}
-			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				t.Errorf("failed to decode JSON response: %v", err)
-			}
-		})
-	}
-}
 
 // Multi-cluster integration tests
 

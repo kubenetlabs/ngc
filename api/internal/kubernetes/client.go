@@ -8,6 +8,7 @@ import (
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -18,7 +19,13 @@ import (
 
 // Client wraps a controller-runtime client for typed access to Gateway API resources.
 type Client struct {
-	client client.Client
+	client        client.Client
+	dynamicClient dynamic.Interface
+}
+
+// DynamicClient returns the dynamic Kubernetes client for unstructured access.
+func (c *Client) DynamicClient() dynamic.Interface {
+	return c.dynamicClient
 }
 
 // New creates a new Kubernetes client.
@@ -46,8 +53,13 @@ func New(kubeconfig string) (*Client, error) {
 		return nil, fmt.Errorf("creating controller-runtime client: %w", err)
 	}
 
+	dc, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating dynamic client: %w", err)
+	}
+
 	slog.Info("kubernetes client initialized", "host", cfg.Host)
-	return &Client{client: c}, nil
+	return &Client{client: c, dynamicClient: dc}, nil
 }
 
 // NewFromContext creates a new Kubernetes client using the specified kubeconfig path
@@ -81,8 +93,13 @@ func NewFromContext(kubeconfigPath, contextName string) (*Client, error) {
 		return nil, fmt.Errorf("creating controller-runtime client: %w", err)
 	}
 
+	dc, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating dynamic client: %w", err)
+	}
+
 	slog.Info("kubernetes client initialized", "host", cfg.Host, "context", contextName)
-	return &Client{client: c}, nil
+	return &Client{client: c, dynamicClient: dc}, nil
 }
 
 func resolveConfig(kubeconfig string) (*rest.Config, error) {

@@ -44,6 +44,22 @@ controller:
       cpu: 500m
       memory: 256Mi
 
+operator:
+  replicas: 1
+  leaderElection: true
+  reconcileInterval: 60s
+  image:
+    repository: registry.f5.com/ngf-console/operator
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
 database:
   type: postgresql
   postgresql:

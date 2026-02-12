@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { fetchInferencePools, fetchInferenceMetricsSummary, fetchEPPDecisions } from "@/api/inference";
+import { fetchInferenceStacks } from "@/api/inferencestacks";
 import { MetricCard } from "@/components/inference/MetricCard";
 import { GPUUtilizationBar } from "@/components/inference/GPUUtilizationBar";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
@@ -11,6 +12,12 @@ export default function InferenceOverview() {
   const { data: pools } = useQuery({
     queryKey: ["inference-pools", activeCluster],
     queryFn: fetchInferencePools,
+    refetchInterval: 10000,
+  });
+
+  const { data: stacks } = useQuery({
+    queryKey: ["inference-stacks", activeCluster],
+    queryFn: fetchInferenceStacks,
     refetchInterval: 10000,
   });
 
@@ -30,6 +37,8 @@ export default function InferenceOverview() {
   });
 
   const totalGPUs = pools?.reduce((sum, p) => sum + p.gpuCount * p.replicas, 0) ?? 0;
+  const readyStacks = stacks?.filter((s) => s.phase === "Ready").length ?? 0;
+  const degradedStacks = stacks?.filter((s) => s.phase === "Degraded").length ?? 0;
 
   return (
     <div>
@@ -47,7 +56,12 @@ export default function InferenceOverview() {
       </div>
 
       {/* Summary cards */}
-      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <MetricCard
+          title="Stacks"
+          value={stacks?.length ?? 0}
+          subtitle={`${readyStacks} ready${degradedStacks > 0 ? `, ${degradedStacks} degraded` : ""}`}
+        />
         <MetricCard
           title="Total Pools"
           value={pools?.length ?? 0}

@@ -11,8 +11,14 @@ interface UseWebSocketOptions {
 export function useWebSocket({ url, onMessage, reconnectInterval = 3000, enabled = true }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const onMessageRef = useRef(onMessage);
   const [connected, setConnected] = useState(false);
   const activeCluster = useActiveCluster();
+
+  // Keep onMessage ref current without triggering reconnects
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -32,9 +38,9 @@ export function useWebSocket({ url, onMessage, reconnectInterval = 3000, enabled
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          onMessage?.(data);
+          onMessageRef.current?.(data);
         } catch {
-          onMessage?.(event.data);
+          onMessageRef.current?.(event.data);
         }
       };
 
@@ -47,7 +53,7 @@ export function useWebSocket({ url, onMessage, reconnectInterval = 3000, enabled
       clearTimeout(reconnectTimerRef.current);
       wsRef.current?.close();
     };
-  }, [url, onMessage, reconnectInterval, enabled, activeCluster]);
+  }, [url, reconnectInterval, enabled, activeCluster]);
 
   const send = useCallback((data: unknown) => {
     wsRef.current?.send(JSON.stringify(data));

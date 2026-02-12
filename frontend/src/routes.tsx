@@ -47,6 +47,7 @@ export const routes: RouteObject[] = [
       { path: "routes/:ns/:name", element: <RouteDetail /> },
       { path: "routes/:ns/:name/edit", element: <RouteEdit /> },
       { path: "policies", element: <PolicyList /> },
+      { path: "policies/create", element: <PolicyCreate /> },
       { path: "policies/create/:type", element: <PolicyCreate /> },
       { path: "certificates", element: <CertificateList /> },
       { path: "observability", element: <ObservabilityDashboard /> },
@@ -59,6 +60,18 @@ export const routes: RouteObject[] = [
       { path: "migration/new", element: <MigrationNew /> },
       { path: "audit", element: <AuditLog /> },
       { path: "settings", element: <SettingsPage /> },
+      {
+        path: "*",
+        element: (
+          <div className="flex flex-col items-center justify-center py-20">
+            <h1 className="text-4xl font-bold text-foreground">404</h1>
+            <p className="mt-2 text-muted-foreground">Page not found</p>
+            <a href="/" className="mt-4 text-sm text-blue-400 hover:underline">
+              Back to Dashboard
+            </a>
+          </div>
+        ),
+      },
     ],
   },
 ];

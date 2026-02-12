@@ -1,28 +1,46 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/kubenetlabs/ngc/api/internal/alerting"
+	ch "github.com/kubenetlabs/ngc/api/internal/clickhouse"
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/database"
 	"github.com/kubenetlabs/ngc/api/internal/handlers"
 	"github.com/kubenetlabs/ngc/api/internal/inference"
+	prom "github.com/kubenetlabs/ngc/api/internal/prometheus"
 )
+
+// writeNotImpl sends a 501 Not Implemented JSON response.
+func writeNotImpl(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+}
 
 // Config holds server dependencies.
 type Config struct {
 	ClusterManager  *cluster.Manager
 	MetricsProvider inference.MetricsProvider
+	Store           database.Store
+	PromClient      *prom.Client
+	CHClient        *ch.Client
+	Webhooks        []alerting.WebhookConfig
 }
 
 // Server is the main HTTP server for the NGF Console API.
 type Server struct {
-	Router chi.Router
-	Config Config
-	Hub    *Hub
+	Router    chi.Router
+	Config    Config
+	Hub       *Hub
+	Evaluator *alerting.Evaluator
 }
 
 // New creates a new Server with all routes and middleware configured.
@@ -34,12 +52,17 @@ func New(cfg Config) *Server {
 	r.Use(RequestLogger)
 	r.Use(CORSMiddleware)
 	r.Use(chimw.Recoverer)
+	r.Use(MaxBodySize(1 << 20)) // 1MB max body size
 
 	hub := NewHub()
 	RegisterInferenceTopics(hub)
 	hub.Start()
 
-	s := &Server{Router: r, Config: cfg, Hub: hub}
+	// Create and start the alert evaluator.
+	eval := alerting.New(cfg.Store, cfg.Webhooks)
+	eval.Start(context.Background())
+
+	s := &Server{Router: r, Config: cfg, Hub: hub, Evaluator: eval}
 	s.registerRoutes()
 
 	return s
@@ -59,17 +82,23 @@ func (s *Server) registerRoutes() {
 	clusterHandler := &handlers.ClusterHandler{Manager: s.Config.ClusterManager}
 	pol := &handlers.PolicyHandler{}
 	cert := &handlers.CertificateHandler{}
-	met := &handlers.MetricsHandler{}
-	lg := &handlers.LogHandler{}
+	met := &handlers.MetricsHandler{Prom: s.Config.PromClient}
+	lg := &handlers.LogHandler{CH: s.Config.CHClient}
 	topo := &handlers.TopologyHandler{}
 	diag := &handlers.DiagnosticsHandler{}
 	inf := &handlers.InferenceHandler{Provider: s.Config.MetricsProvider}
 	infMet := &handlers.InferenceMetricsHandler{Provider: s.Config.MetricsProvider}
 	infDiag := &handlers.InferenceDiagHandler{}
+	infStack := &handlers.InferenceStackHandler{}
+	gwBundle := &handlers.GatewayBundleHandler{}
 	coex := &handlers.CoexistenceHandler{}
 	xc := &handlers.XCHandler{}
 	mig := &handlers.MigrationHandler{}
-	aud := &handlers.AuditHandler{}
+	aud := &handlers.AuditHandler{Store: s.Config.Store}
+	alert := &handlers.AlertHandler{Store: s.Config.Store, Evaluator: s.Evaluator}
+
+	// Health check endpoint (outside /api/v1 for simplicity with probes)
+	s.Router.Get("/api/v1/health", handlers.HealthCheck)
 
 	s.Router.Route("/api/v1", func(r chi.Router) {
 		// Cluster management (no cluster middleware needed)
@@ -78,13 +107,13 @@ func (s *Server) registerRoutes() {
 		// Cluster-scoped routes (new multi-cluster paths)
 		r.Route("/clusters/{cluster}", func(r chi.Router) {
 			r.Use(ClusterResolver(s.Config.ClusterManager))
-			s.mountResourceRoutes(r, gw, rt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, coex, xc, mig, aud)
+			s.mountResourceRoutes(r, gw, rt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, infStack, gwBundle, coex, xc, mig, aud, alert)
 		})
 
 		// Legacy routes (backward compat — uses default cluster)
 		r.Group(func(r chi.Router) {
 			r.Use(ClusterResolver(s.Config.ClusterManager))
-			s.mountResourceRoutes(r, gw, rt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, coex, xc, mig, aud)
+			s.mountResourceRoutes(r, gw, rt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, infStack, gwBundle, coex, xc, mig, aud, alert)
 		})
 
 		// WebSocket
@@ -115,10 +144,13 @@ func (s *Server) mountResourceRoutes(
 	inf *handlers.InferenceHandler,
 	infMet *handlers.InferenceMetricsHandler,
 	infDiag *handlers.InferenceDiagHandler,
+	infStack *handlers.InferenceStackHandler,
+	gwBundle *handlers.GatewayBundleHandler,
 	coex *handlers.CoexistenceHandler,
 	xc *handlers.XCHandler,
 	mig *handlers.MigrationHandler,
 	aud *handlers.AuditHandler,
+	alert *handlers.AlertHandler,
 ) {
 	// Config
 	r.Get("/config", cfgHandler.GetConfig)
@@ -139,6 +171,16 @@ func (s *Server) mountResourceRoutes(
 		r.Post("/{namespace}/{name}/deploy", gw.Deploy)
 	})
 
+	// GatewayBundles (CRD-backed via dynamic client)
+	r.Route("/gatewaybundles", func(r chi.Router) {
+		r.Get("/", gwBundle.List)
+		r.Post("/", gwBundle.Create)
+		r.Get("/{namespace}/{name}", gwBundle.Get)
+		r.Put("/{namespace}/{name}", gwBundle.Update)
+		r.Delete("/{namespace}/{name}", gwBundle.Delete)
+		r.Get("/{namespace}/{name}/status", gwBundle.GetStatus)
+	})
+
 	// HTTP Routes (namespace-aware)
 	r.Route("/httproutes", func(r chi.Router) {
 		r.Get("/", rt.List)
@@ -149,40 +191,40 @@ func (s *Server) mountResourceRoutes(
 		r.Post("/{namespace}/{name}/simulate", rt.Simulate)
 	})
 
-	// gRPC Routes
+	// gRPC Routes (not yet implemented — return 501)
 	r.Route("/grpcroutes", func(r chi.Router) {
-		r.Get("/", rt.List)
-		r.Post("/", rt.Create)
-		r.Get("/{namespace}/{name}", rt.Get)
-		r.Put("/{namespace}/{name}", rt.Update)
-		r.Delete("/{namespace}/{name}", rt.Delete)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Post("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Get("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Put("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Delete("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
 	})
 
-	// TLS Routes
+	// TLS Routes (not yet implemented — return 501)
 	r.Route("/tlsroutes", func(r chi.Router) {
-		r.Get("/", rt.List)
-		r.Post("/", rt.Create)
-		r.Get("/{namespace}/{name}", rt.Get)
-		r.Put("/{namespace}/{name}", rt.Update)
-		r.Delete("/{namespace}/{name}", rt.Delete)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Post("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Get("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Put("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Delete("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
 	})
 
-	// TCP Routes
+	// TCP Routes (not yet implemented — return 501)
 	r.Route("/tcproutes", func(r chi.Router) {
-		r.Get("/", rt.List)
-		r.Post("/", rt.Create)
-		r.Get("/{namespace}/{name}", rt.Get)
-		r.Put("/{namespace}/{name}", rt.Update)
-		r.Delete("/{namespace}/{name}", rt.Delete)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Post("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Get("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Put("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Delete("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
 	})
 
-	// UDP Routes
+	// UDP Routes (not yet implemented — return 501)
 	r.Route("/udproutes", func(r chi.Router) {
-		r.Get("/", rt.List)
-		r.Post("/", rt.Create)
-		r.Get("/{namespace}/{name}", rt.Get)
-		r.Put("/{namespace}/{name}", rt.Update)
-		r.Delete("/{namespace}/{name}", rt.Delete)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Post("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Get("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Put("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Delete("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
 	})
 
 	// Policies
@@ -269,6 +311,16 @@ func (s *Server) mountResourceRoutes(
 			r.Post("/replay", infDiag.Replay)
 			r.Post("/benchmark", infDiag.Benchmark)
 		})
+
+		// InferenceStacks (CRD-backed via dynamic client)
+		r.Route("/stacks", func(r chi.Router) {
+			r.Get("/", infStack.List)
+			r.Post("/", infStack.Create)
+			r.Get("/{namespace}/{name}", infStack.Get)
+			r.Put("/{namespace}/{name}", infStack.Update)
+			r.Delete("/{namespace}/{name}", infStack.Delete)
+			r.Get("/{namespace}/{name}/status", infStack.GetStatus)
+		})
 	})
 
 	// Coexistence
@@ -299,5 +351,16 @@ func (s *Server) mountResourceRoutes(
 	r.Route("/audit", func(r chi.Router) {
 		r.Get("/", aud.List)
 		r.Get("/diff/{id}", aud.Diff)
+	})
+
+	// Alerts
+	r.Route("/alerts", func(r chi.Router) {
+		r.Get("/", alert.List)
+		r.Post("/", alert.Create)
+		r.Get("/firing", alert.Firing)
+		r.Get("/{id}", alert.Get)
+		r.Put("/{id}", alert.Update)
+		r.Delete("/{id}", alert.Delete)
+		r.Post("/{id}/toggle", alert.Toggle)
 	})
 }

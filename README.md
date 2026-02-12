@@ -2,226 +2,279 @@
 
 Web-based management platform for [NGINX Gateway Fabric](https://github.com/nginx/nginx-gateway-fabric) with native Kubernetes Gateway API and [Gateway Inference Extensions](https://gateway-api.sigs.k8s.io/geps/gep-1742/) support.
 
-## What it does
+## Features
 
-- **Gateway Management** -- CRUD for Gateways, HTTPRoutes, GRPCRoutes, TLSRoutes, TCPRoutes, UDPRoutes
-- **Inference Observability** -- Real-time GPU metrics, EPP (Endpoint Picker) decision visualization, per-pod KV-cache and queue depth monitoring, TTFT histograms, cost estimation
+- **Gateway Management** -- CRUD for Gateways, HTTPRoutes via GatewayBundle CRDs with operator-driven reconciliation
+- **Inference Observability** -- Real-time GPU metrics, EPP decision visualization, per-pod KV-cache and queue depth monitoring, TTFT histograms, cost estimation
+- **Operator-Driven Architecture** -- Declarative CRDs (InferenceStack, GatewayBundle) with drift detection, self-healing, and status aggregation
 - **Multi-Cluster** -- Manage multiple Kubernetes clusters from a single console
+- **Migration Tooling** -- Import NGINX configs, Ingress, and VirtualServer resources; analyze, generate, and apply Gateway API equivalents
+- **Observability Stack** -- ClickHouse analytics, Prometheus RED metrics, OpenTelemetry collection, log exploration
+- **Alerting** -- Configurable alert rules with webhook notifications for cert expiry, error rates, and GPU saturation
 - **WebSocket Streaming** -- Live EPP decision feed, GPU metrics updates, scaling events
+- **F5 Distributed Cloud** -- Publish routes and inference endpoints to F5 XC (Enterprise)
+
+## Architecture
+
+```
+                    +------------------+
+                    |    Browser       |
+                    |  React + Vite    |
+                    +--------+---------+
+                             |
+                             v
+                    +------------------+
+                    |  Go API Server   |
+                    |  (Chi Router)    |
+                    +--+--+--+--+--+--+
+                       |  |  |  |  |
+          +------------+  |  |  |  +----------+
+          |               |  |  |             |
+          v               v  |  v             v
+  +-------+------+  +----++ |+-+-----+  +----+--------+
+  |  Kubernetes   |  |Prom| || Config |  |  WebSocket  |
+  |  (client-go)  |  |    | || DB     |  |  Hub        |
+  +-------+------+  +----++ |+--------+  +-------------+
+          |               |  |
+          v               v  v
+  +-------+------+  +----+--+-----+
+  | K8s Clusters  |  | ClickHouse  |
+  | + Operator    |  | + OTel      |
+  +--------------++  +-------------+
+                 |
+          +------+------+
+          |  Operator    |
+          |  (CRDs)      |
+          +-------------+
+```
+
+**Components:**
+
+| Component | Directory | Description |
+|-----------|-----------|-------------|
+| Frontend | `frontend/` | React 18 + TypeScript + Vite + Tailwind CSS |
+| API Server | `api/` | Go + Chi router + WebSocket hub |
+| Operator | `operator/` | controller-runtime, reconciles InferenceStack and GatewayBundle CRDs |
+| Controller | `controller/` | Route watcher, XC publish controller |
+| Migration CLI | `migration-cli/` | Cobra CLI for KIC-to-NGF migration |
 
 ## Prerequisites
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Go | 1.25+ | https://go.dev/dl/ |
+| Go | 1.23+ | https://go.dev/dl/ |
 | Node.js | 20+ | https://nodejs.org/ |
 | pnpm | 9+ | `npm install -g pnpm` |
-| kubectl | any | https://kubernetes.io/docs/tasks/tools/ |
+| kubectl | 1.28+ | https://kubernetes.io/docs/tasks/tools/ |
 
 A Kubernetes cluster with NGINX Gateway Fabric installed is required for gateway features. Inference features work fully with mock data (no cluster needed).
 
-## Quick Start (Demo Mode)
+## Quick Start
 
-The fastest way to see the product end-to-end. Uses mock data for inference metrics -- no Kubernetes cluster, Docker, or ClickHouse required.
+### Demo mode (no cluster required)
 
 **Terminal 1 -- API server:**
 
 ```bash
-cd api
-go run ./cmd/server
+cd api && go run ./cmd/server
 ```
 
 **Terminal 2 -- Frontend:**
 
 ```bash
-cd frontend
-pnpm install
-pnpm dev
+cd frontend && pnpm install && pnpm dev
 ```
 
-Open **http://localhost:5173** in your browser.
+Open **http://localhost:5173**. Inference metrics use mock data. Gateway/route pages require a Kubernetes cluster.
 
-### Demo walkthrough
-
-| Page | URL | What you'll see |
-|------|-----|-----------------|
-| Dashboard | http://localhost:5173/ | Overview with cluster status |
-| Inference Overview | http://localhost:5173/inference | Summary cards (Total Pools, GPUs, Avg GPU Util, Avg TTFT), pool list, recent EPP decisions |
-| Inference Pools | http://localhost:5173/inference/pools | Table of all pools with GPU utilization bars, status badges |
-| Pool Detail | Click any pool name | Tabbed view: Overview, EPP Decisions (live WebSocket feed), Metrics (time-series charts), Cost |
-| Gateways | http://localhost:5173/gateways | Gateway list (requires Kubernetes connection) |
-| Routes | http://localhost:5173/routes | HTTPRoute list (requires Kubernetes connection) |
-
-The Inference Pool Detail page is the hero feature. Click a pool, then explore the tabs:
-
-- **Overview** -- Summary metrics + GPU heatmap showing per-pod utilization
-- **EPP Decisions** -- Live visualization of request routing decisions streaming via WebSocket. Pod cards flash when they receive new requests.
-- **Metrics** -- TTFT histogram, tokens-per-second throughput, queue depth, GPU utilization, and KV-cache time-series charts
-- **Cost** -- Hourly/daily/monthly cost estimates based on GPU type and replica count
-
-## Connecting to a Kubernetes Cluster
-
-### Single cluster (default)
-
-The API server auto-discovers your kubeconfig in this order:
-
-1. In-cluster config (when running inside Kubernetes)
-2. `--kubeconfig` flag
-3. `KUBECONFIG` environment variable
-4. `~/.kube/config`
+### With a Kubernetes cluster
 
 ```bash
-# Uses ~/.kube/config automatically
+# Install Gateway API CRDs
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
+
+# Install NGF Console CRDs
+kubectl apply -f deploy/k8s/ngf-console.f5.com_inferencestacks.yaml
+kubectl apply -f deploy/k8s/ngf-console.f5.com_gatewaybundles.yaml
+kubectl apply -f deploy/k8s/ngf-console.f5.com_distributedcloudpublishes.yaml
+
+# Start API (auto-discovers ~/.kube/config)
 cd api && go run ./cmd/server
 
-# Or specify explicitly
+# Or specify a kubeconfig
 cd api && go run ./cmd/server --kubeconfig /path/to/kubeconfig
 ```
 
-The cluster must have the [Gateway API CRDs](https://gateway-api.sigs.k8s.io/guides/#installing-gateway-api) installed:
+### With ClickHouse (real metrics)
 
 ```bash
-kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml
-```
-
-### Multi-cluster
-
-To manage multiple clusters, create a YAML config file:
-
-```yaml
-# clusters.yaml
-clusters:
-  - name: production
-    displayName: "Production US-East"
-    kubeconfig: /path/to/prod-kubeconfig.yaml
-    default: true
-
-  - name: staging
-    displayName: "Staging EU-West"
-    kubeconfig: /path/to/staging-kubeconfig.yaml
-    context: staging-admin    # optional: use a specific context
-
-  - name: dev
-    displayName: "Dev Local"
-    kubeconfig: /path/to/dev-kubeconfig.yaml
-```
-
-Start the server with:
-
-```bash
-cd api && go run ./cmd/server --clusters-config clusters.yaml
-```
-
-**Config rules:**
-- `name` -- lowercase alphanumeric with hyphens, 1-63 chars (e.g., `prod-us-east`)
-- `kubeconfig` -- absolute path to the kubeconfig file for this cluster
-- `context` -- (optional) specific context within the kubeconfig; defaults to current-context
-- `default` -- (optional) at most one cluster can be marked default; if none, the first entry is used
-
-The frontend automatically routes API requests to the selected cluster. Use the cluster switcher in the UI to change between clusters.
-
-**API routing with multi-cluster:**
-
-```
-# Cluster-scoped (explicit)
-GET /api/v1/clusters/production/gateways
-GET /api/v1/clusters/staging/inference/pools
-
-# Legacy (uses default cluster)
-GET /api/v1/gateways
-GET /api/v1/inference/pools
-```
-
-### Adding a new NGF instance
-
-Each NGF instance is a Kubernetes cluster running NGINX Gateway Fabric. To add one:
-
-1. **Install NGINX Gateway Fabric** on the target cluster:
-
-   ```bash
-   kubectl apply -f https://github.com/nginx/nginx-gateway-fabric/releases/download/v1.6.2/deploy.yaml
-   ```
-
-2. **Ensure you have a kubeconfig** that can reach the cluster:
-
-   ```bash
-   # Verify connectivity
-   kubectl --kubeconfig /path/to/new-cluster.yaml get gateways -A
-   ```
-
-3. **Add to clusters.yaml** (if using multi-cluster mode):
-
-   ```yaml
-   clusters:
-     # ... existing clusters ...
-     - name: new-cluster
-       displayName: "New NGF Instance"
-       kubeconfig: /path/to/new-cluster.yaml
-   ```
-
-4. **Restart the API server.** The new cluster appears in the UI cluster switcher immediately.
-
-For single-cluster mode, just point `--kubeconfig` at the new cluster's kubeconfig and restart.
-
-## Running with ClickHouse (Production Metrics)
-
-For real observability data instead of mock data:
-
-```bash
-# Start ClickHouse and OpenTelemetry Collector
+# Start ClickHouse + OTel Collector
 make dev-compose
-
-# Seed demo data
-docker exec -i $(docker ps -q -f ancestor=clickhouse/clickhouse-server:24.1) \
-  clickhouse-client < deploy/docker-compose/clickhouse/seed.sql
 
 # Start API with ClickHouse backend
 cd api && go run ./cmd/server --db-type clickhouse --clickhouse-url localhost:9000
 ```
 
+### Docker Compose (full stack)
+
+```bash
+docker compose -f deploy/docker-compose/docker-compose.yaml up
+```
+
+| Service | Port | Description |
+|---------|------|-------------|
+| Frontend | 3000 | Nginx serving React build |
+| API | 8080 | Go API server |
+| ClickHouse | 8123, 9000 | Analytics database |
+| OTel Collector | 4317, 4318 | Telemetry ingestion |
+
+## Kubernetes Deployment
+
+### Helm
+
+```bash
+# Install CRDs first (persisted across helm upgrades/uninstalls)
+kubectl apply -f deploy/helm/ngf-console/crds/
+
+# Install the chart
+helm install ngf-console deploy/helm/ngf-console \
+  --namespace ngf-system \
+  --create-namespace
+```
+
+Common overrides:
+
+```bash
+# OSS edition, mock metrics
+helm install ngf-console deploy/helm/ngf-console \
+  --namespace ngf-system --create-namespace \
+  --set clickhouse.enabled=false
+
+# Enterprise with Prometheus
+helm install ngf-console deploy/helm/ngf-console \
+  --namespace ngf-system --create-namespace \
+  --set ngf.edition=enterprise \
+  --set prometheus.url=http://prometheus.monitoring:9090
+
+# External ClickHouse
+helm install ngf-console deploy/helm/ngf-console \
+  --namespace ngf-system --create-namespace \
+  --set clickhouse.enabled=false \
+  --set api.clickhouseUrl=clickhouse.monitoring:9000
+
+# Custom ingress hostname
+helm install ngf-console deploy/helm/ngf-console \
+  --namespace ngf-system --create-namespace \
+  --set ingress.hostname=console.mycompany.com
+```
+
+See [`docs/installation.md`](docs/installation.md) for full installation instructions and [`docs/configuration.md`](docs/configuration.md) for all configuration options.
+
+## Multi-Cluster
+
+Create a `clusters.yaml` file:
+
+```yaml
+clusters:
+  - name: production
+    displayName: "Production US-East"
+    kubeconfig: /path/to/prod-kubeconfig.yaml
+    default: true
+  - name: staging
+    displayName: "Staging EU-West"
+    kubeconfig: /path/to/staging-kubeconfig.yaml
+```
+
+Start with:
+
+```bash
+cd api && go run ./cmd/server --clusters-config clusters.yaml
+```
+
+The frontend cluster switcher routes API requests to the selected cluster. Both cluster-scoped (`/api/v1/clusters/{name}/...`) and legacy (`/api/v1/...`) routes are supported.
+
 ## Project Structure
 
 ```
 ngc/
-  api/                        # Go API server
-    cmd/server/               # Entry point
+  api/                          # Go API server (Chi router)
+    cmd/server/                 # Entry point
     internal/
-      handlers/               # HTTP handlers (gateways, routes, inference, metrics)
-      inference/              # MetricsProvider interface, mock implementation, types
-      clickhouse/             # ClickHouse provider implementation
-      cluster/                # Multi-cluster manager
-      kubernetes/             # K8s client wrapper
-      server/                 # Chi router, middleware, WebSocket hub
-  frontend/                   # React + TypeScript + Vite
+      handlers/                 # HTTP handlers (30+ handler files)
+      inference/                # MetricsProvider interface + mock
+      clickhouse/               # ClickHouse provider implementation
+      prometheus/               # Prometheus RED metrics client
+      cluster/                  # Multi-cluster manager
+      kubernetes/               # K8s client wrapper
+      database/                 # SQLite/PostgreSQL config store
+      alerting/                 # Alert evaluation engine + webhooks
+      server/                   # Chi router, middleware, WebSocket hub
+    pkg/
+      types/                    # Shared API types
+      version/                  # Build version info
+  frontend/                     # React 18 + TypeScript + Vite
     src/
-      api/                    # Axios API functions
-      components/inference/   # GPU heatmap, EPP visualizer, charts, pod cards
-      pages/                  # InferenceOverview, InferencePoolList, InferencePoolDetail
-      types/                  # TypeScript interfaces
-      store/                  # Zustand state (cluster, settings)
-  controller/                 # Kubernetes controller (controller-runtime)
-  migration-cli/              # NGINX config migration tool
+      api/                      # API client functions
+      components/               # Shared UI components
+      pages/                    # 26 page components
+      types/                    # TypeScript interfaces
+      store/                    # Zustand state stores
+      hooks/                    # Custom React hooks (WebSocket, etc.)
+  operator/                     # Kubernetes operator (controller-runtime)
+    api/v1alpha1/               # CRD type definitions
+    cmd/                        # Operator entry point
+    internal/controller/        # Reconciliation controllers
+    config/crd/bases/           # Generated CRD YAML
+  controller/                   # Route watcher + XC publish controller
+  migration-cli/                # KIC migration CLI (cobra)
+    cmd/                        # scan, plan, apply, validate commands
   deploy/
-    docker-compose/           # Dev environment (ClickHouse, OTel Collector)
-    helm/ngf-console/         # Production Helm chart
+    docker-compose/             # Dev environment (ClickHouse, OTel)
+    helm/ngf-console/           # Production Helm chart
+    k8s/                        # Standalone CRD manifests
+    manifests/                  # Generated install manifests
+  docs/                         # Documentation
 ```
 
-## Build & Test
+## Custom Resource Definitions
 
-```bash
-# Build everything
-make build
+The operator manages two primary CRDs:
 
-# Run all tests
-make test
+### InferenceStack
 
-# Lint
-make lint
+Declares an inference serving stack. The operator reconciles child resources: InferencePool, EPP ConfigMap, KEDA ScaledObject, HTTPRoute, and DCGM DaemonSet.
 
-# Individual components
-cd api && go test ./...
-cd frontend && pnpm build
-cd frontend && pnpm lint
+```yaml
+apiVersion: ngf-console.f5.com/v1alpha1
+kind: InferenceStack
+metadata:
+  name: llama-70b
+  namespace: inference
+spec:
+  modelName: meta-llama/Llama-3-70B-Instruct
+  servingBackend: vllm
+  pool:
+    gpuType: H100
+    gpuCount: 4
+    replicas: 6
+```
+
+### GatewayBundle
+
+Declares a gateway with optional enterprise features. The operator reconciles the Gateway child plus NginxProxy, WAF, SnippetsFilter, and TLS Secrets.
+
+```yaml
+apiVersion: ngf-console.f5.com/v1alpha1
+kind: GatewayBundle
+metadata:
+  name: main-gateway
+  namespace: default
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
 ```
 
 ## API Flags
@@ -233,26 +286,39 @@ cd frontend && pnpm lint
 | `--clusters-config` | (none) | Path to multi-cluster YAML config |
 | `--db-type` | `mock` | Metrics provider: `mock` or `clickhouse` |
 | `--clickhouse-url` | `localhost:9000` | ClickHouse connection URL |
+| `--prometheus-url` | (none) | Prometheus server URL for RED metrics |
+| `--config-db` | `ngf-console.db` | Path to SQLite config database |
+| `--alert-webhooks` | (none) | Comma-separated webhook URLs for alert notifications |
 | `--version` | | Print version and exit |
 
-## Deployment
-
-### Helm (production)
+## Build & Test
 
 ```bash
-helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system \
-  --create-namespace \
-  --set clickhouse.enabled=true \
-  --set inference.enabled=true
+make build            # Build all components
+make test             # Run all tests
+make lint             # Run all linters
+make docker-build     # Build all Docker images
+make helm-template    # Render Helm templates
+make generate-crds    # Regenerate CRD YAML from Go types
 ```
 
-See `deploy/helm/ngf-console/values.yaml` for all configuration options.
-
-### Docker Compose (full local stack)
+Individual components:
 
 ```bash
-docker compose -f deploy/docker-compose/docker-compose.yaml up
+cd api && go build ./... && go test ./...
+cd operator && go build ./... && go test ./...
+cd frontend && pnpm build && pnpm lint
+cd migration-cli && go build ./...
 ```
 
-This starts the frontend (port 3000), API (port 8080), ClickHouse (port 9000), and OTel Collector (port 4317).
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Installation Guide](docs/installation.md) | Step-by-step installation for dev, Docker Compose, and Kubernetes |
+| [Configuration Reference](docs/configuration.md) | All API flags, Helm values, environment variables, and CRD specs |
+| [Architecture](docs/architecture.md) | System design, data flows, and component interactions |
+| [Development Guide](docs/development.md) | Local setup, coding conventions, and contribution workflow |
+| [API Reference](docs/api-reference.md) | Complete REST API endpoint documentation |
+| [Migration Guide](docs/migration-guide.md) | Migrating from NGINX Ingress Controller to Gateway API |
+| [XC Integration](docs/xc-integration.md) | F5 Distributed Cloud publishing and metrics |

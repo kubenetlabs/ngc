@@ -5,6 +5,7 @@ import { routes } from "./routes";
 import { fetchConfig } from "./api/config";
 import { useSettingsStore } from "./store/settingsStore";
 import { useActiveCluster } from "./hooks/useActiveCluster";
+import { ErrorBoundary } from "./components/common/ErrorBoundary";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,17 +38,19 @@ function EditionDetector() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <EditionDetector />
-      <Suspense
-        fallback={
-          <div className="flex h-screen items-center justify-center">
-            <div className="text-muted-foreground">Loading...</div>
-          </div>
-        }
-      >
-        <RouterProvider router={router} />
-      </Suspense>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <EditionDetector />
+        <Suspense
+          fallback={
+            <div className="flex h-screen items-center justify-center">
+              <div className="text-muted-foreground">Loading...</div>
+            </div>
+          }
+        >
+          <RouterProvider router={router} />
+        </Suspense>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

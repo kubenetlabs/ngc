@@ -176,7 +176,6 @@ func (h *Hub) writePump(client *wsClient) {
 func (h *Hub) readPump(client *wsClient) {
 	defer func() {
 		h.unregister <- client
-		client.conn.Close()
 	}()
 	for {
 		_, _, err := client.conn.ReadMessage()

@@ -27,17 +27,13 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
-          env:
-            - name: DATABASE_TYPE
-              value: {{ .Values.database.type | quote }}
-            - name: NGF_EDITION
-              value: {{ .Values.ngf.edition | quote }}
+          args:
+            - "--port=8080"
+            - "--config-db=/data/ngf-console.db"
             {{- if .Values.clickhouse.enabled }}
-            - name: CLICKHOUSE_URL
-              value: "http://{{ include "ngf-console.fullname" . }}-clickhouse:8123"
+            - "--db-type=clickhouse"
+            - "--clickhouse-url={{ include "ngf-console.fullname" . }}-clickhouse:9000"
             {{- end }}
-            - name: PROMETHEUS_URL
-              value: {{ .Values.prometheus.url | quote }}
           livenessProbe:
             httpGet:
               path: /api/v1/health

@@ -5,30 +5,54 @@ metadata:
   labels:
     {{- include "ngf-console.labels" . | nindent 4 }}
 rules:
+  # Gateway API resources
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways", "gatewayclasses", "httproutes", "grpcroutes", "tlsroutes", "tcproutes", "udproutes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways/status", "httproutes/status"]
     verbs: ["get", "list", "watch"]
+  # Gateway Inference Extension
   - apiGroups: ["inference.networking.x-k8s.io"]
     resources: ["inferencepools"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # NGF Console CRDs
   - apiGroups: ["ngf-console.f5.com"]
-    resources: ["distributedcloudpublishes"]
+    resources: ["inferencestacks", "distributedcloudpublishes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["ngf-console.f5.com"]
-    resources: ["distributedcloudpublishes/status"]
+    resources: ["inferencestacks/status", "distributedcloudpublishes/status"]
     verbs: ["get", "update", "patch"]
+  - apiGroups: ["ngf-console.f5.com"]
+    resources: ["inferencestacks/finalizers", "distributedcloudpublishes/finalizers"]
+    verbs: ["update"]
+  # Core resources
   - apiGroups: [""]
     resources: ["secrets", "configmaps", "services", "pods", "events", "namespaces"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # Apps resources
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Autoscaling
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # KEDA
+  - apiGroups: ["keda.sh"]
+    resources: ["scaledobjects"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # API extensions (for edition detection)
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]

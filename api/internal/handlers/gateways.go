@@ -2,15 +2,29 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
 )
 
 // GatewayHandler handles Gateway and GatewayClass API requests.
+// Create, Update, and Delete now operate on GatewayBundle CRDs,
+// while List and Get still read Gateway resources directly for live status.
 type GatewayHandler struct{}
+
+// getDynamicClient returns the dynamic client from the cluster context.
+func (h *GatewayHandler) getDynamicClient(r *http.Request) dynamic.Interface {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		return nil
+	}
+	return k8s.DynamicClient()
+}
 
 // List returns all gateways, optionally filtered by ?namespace= query param.
 func (h *GatewayHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -92,10 +106,10 @@ func (h *GatewayHandler) GetClass(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toGatewayClassResponse(gc))
 }
 
-// Create creates a new gateway.
+// Create creates a new gateway via a GatewayBundle CRD.
 func (h *GatewayHandler) Create(w http.ResponseWriter, r *http.Request) {
-	k8s := cluster.ClientFromContext(r.Context())
-	if k8s == nil {
+	dc := h.getDynamicClient(r)
+	if dc == nil {
 		writeError(w, http.StatusServiceUnavailable, "no cluster context")
 		return
 	}
@@ -111,25 +125,35 @@ func (h *GatewayHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gw := toGatewayObject(req)
-	created, err := k8s.CreateGateway(r.Context(), gw)
+	// Convert the gateway request to a GatewayBundle create request.
+	bundleReq := gatewayReqToBundle(req)
+	obj := toGatewayBundleUnstructured(bundleReq)
+
+	created, err := dc.Resource(gatewayBundleGVR).Namespace(req.Namespace).Create(r.Context(), obj, metav1.CreateOptions{})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("creating gatewaybundle: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusCreated, toGatewayResponse(created))
+	writeJSON(w, http.StatusCreated, toGatewayBundleResponse(created))
 }
 
-// Update modifies an existing gateway.
+// Update modifies an existing gateway via the GatewayBundle CRD.
 func (h *GatewayHandler) Update(w http.ResponseWriter, r *http.Request) {
-	k8s := cluster.ClientFromContext(r.Context())
-	if k8s == nil {
+	dc := h.getDynamicClient(r)
+	if dc == nil {
 		writeError(w, http.StatusServiceUnavailable, "no cluster context")
 		return
 	}
 
 	ns := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
+
+	// Fetch existing GatewayBundle to get resourceVersion.
+	existing, err := dc.Resource(gatewayBundleGVR).Namespace(ns).Get(r.Context(), name, metav1.GetOptions{})
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("getting gatewaybundle %s/%s: %v", ns, name, err))
+		return
+	}
 
 	var req UpdateGatewayRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -137,26 +161,27 @@ func (h *GatewayHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := k8s.GetGateway(r.Context(), ns, name)
+	// Convert to GatewayBundle create request for the unstructured builder.
+	bundleReq := gatewayUpdateReqToBundle(name, ns, req)
+	updated := toGatewayBundleUnstructured(bundleReq)
+	updated.SetNamespace(ns)
+	updated.SetName(name)
+	updated.SetResourceVersion(existing.GetResourceVersion())
+	updated.SetUID(existing.GetUID())
+	updated.SetCreationTimestamp(existing.GetCreationTimestamp())
+
+	result, err := dc.Resource(gatewayBundleGVR).Namespace(ns).Update(r.Context(), updated, metav1.UpdateOptions{})
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("updating gatewaybundle %s/%s: %v", ns, name, err))
 		return
 	}
-
-	applyUpdateToGateway(existing, req)
-
-	updated, err := k8s.UpdateGateway(r.Context(), existing)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, toGatewayResponse(updated))
+	writeJSON(w, http.StatusOK, toGatewayBundleResponse(result))
 }
 
-// Delete removes a gateway.
+// Delete removes a gateway via the GatewayBundle CRD.
 func (h *GatewayHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	k8s := cluster.ClientFromContext(r.Context())
-	if k8s == nil {
+	dc := h.getDynamicClient(r)
+	if dc == nil {
 		writeError(w, http.StatusServiceUnavailable, "no cluster context")
 		return
 	}
@@ -164,8 +189,9 @@ func (h *GatewayHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
 
-	if err := k8s.DeleteGateway(r.Context(), ns, name); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	err := dc.Resource(gatewayBundleGVR).Namespace(ns).Delete(r.Context(), name, metav1.DeleteOptions{})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deleting gatewaybundle %s/%s: %v", ns, name, err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "gateway deleted", "name": name, "namespace": ns})
@@ -181,4 +207,53 @@ func writeNotImplemented(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
 	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+}
+
+// gatewayReqToBundle converts a CreateGatewayRequest to a CreateGatewayBundleRequest.
+func gatewayReqToBundle(req CreateGatewayRequest) CreateGatewayBundleRequest {
+	listeners := make([]GatewayBundleListenerReq, 0, len(req.Listeners))
+	for _, l := range req.Listeners {
+		bl := GatewayBundleListenerReq{
+			Name:     l.Name,
+			Port:     l.Port,
+			Protocol: l.Protocol,
+		}
+		if l.Hostname != nil {
+			bl.Hostname = *l.Hostname
+		}
+		listeners = append(listeners, bl)
+	}
+	return CreateGatewayBundleRequest{
+		Name:             req.Name,
+		Namespace:        req.Namespace,
+		GatewayClassName: req.GatewayClassName,
+		Listeners:        listeners,
+		Labels:           req.Labels,
+		Annotations:      req.Annotations,
+	}
+}
+
+// gatewayUpdateReqToBundle converts an UpdateGatewayRequest to a CreateGatewayBundleRequest
+// suitable for the unstructured builder.
+func gatewayUpdateReqToBundle(name, namespace string, req UpdateGatewayRequest) CreateGatewayBundleRequest {
+	listeners := make([]GatewayBundleListenerReq, 0, len(req.Listeners))
+	for _, l := range req.Listeners {
+		bl := GatewayBundleListenerReq{
+			Name:     l.Name,
+			Port:     l.Port,
+			Protocol: l.Protocol,
+		}
+		if l.Hostname != nil {
+			bl.Hostname = *l.Hostname
+		}
+		listeners = append(listeners, bl)
+	}
+	return CreateGatewayBundleRequest{
+		Name:             name,
+		Namespace:        namespace,
+		GatewayClassName: req.GatewayClassName,
+		Listeners:        listeners,
+		Labels:           req.Labels,
+		Annotations:      req.Annotations,
+	}
 }

@@ -1,0 +1,23 @@
+apiVersion: ngf-console.f5.com/v1alpha1
+kind: InferenceStack
+metadata:
+  name: llama3-70b-prod
+  namespace: inference
+spec:
+  modelName: meta-llama/Llama-3-70B-Instruct
+  modelVersion: v1.2
+  servingBackend: vllm
+  pool:
+    gpuType: H100
+    gpuCount: 4
+    replicas: 6
+    minReplicas: 2
+    maxReplicas: 12
+    selector:
+      app: llama3-70b-prod
+  epp:
+    strategy: composite
+    weights:
+      queueDepth: 40
+      kvCache: 35
+      prefixAffinity: 25

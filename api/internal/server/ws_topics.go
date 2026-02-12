@@ -5,12 +5,31 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 )
 
+// safeRand wraps rand.Rand with a mutex for concurrent use.
+type safeRand struct {
+	mu  sync.Mutex
+	rng *rand.Rand
+}
+
+func (sr *safeRand) Intn(n int) int {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	return sr.rng.Intn(n)
+}
+
+func (sr *safeRand) Float64() float64 {
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	return sr.rng.Float64()
+}
+
 // RegisterInferenceTopics adds mock generators for inference WebSocket topics.
 func RegisterInferenceTopics(hub *Hub) {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rng := &safeRand{rng: rand.New(rand.NewSource(time.Now().UnixNano()))}
 
 	// EPP Decisions: emitted every 1s
 	hub.AddGenerator("epp-decisions", 1*time.Second, func() (json.RawMessage, error) {
