@@ -189,7 +189,21 @@ func (h *ClusterHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create kubeconfig Secret.
+	// Default ngfEdition to "oss" if not provided.
+	if req.NGFEdition == "" {
+		req.NGFEdition = "oss"
+	}
+
+	// Reject exec-based kubeconfigs — they won't work from inside the hub cluster.
+	if req.Kubeconfig != "" && (regexp.MustCompile(`(?m)^\s+exec:`).MatchString(req.Kubeconfig) ||
+		regexp.MustCompile(`command:\s*(aws|gcloud|az)\b`).MatchString(req.Kubeconfig)) {
+		writeError(w, http.StatusBadRequest,
+			"kubeconfig uses exec-based authentication (e.g., aws/gcloud/az CLI) which won't work from the hub. "+
+				"Please use a ServiceAccount token-based kubeconfig instead.")
+		return
+	}
+
+	// Create or update kubeconfig Secret.
 	if req.Kubeconfig != "" {
 		secretObj := map[string]interface{}{
 			"apiVersion": "v1",
@@ -203,7 +217,7 @@ func (h *ClusterHandler) Register(w http.ResponseWriter, r *http.Request) {
 				"kubeconfig": req.Kubeconfig,
 			},
 		}
-		if err := h.Pool.CreateRaw(r.Context(), "v1", "secrets", secretObj); err != nil {
+		if err := h.Pool.CreateOrUpdateRaw(r.Context(), "v1", "secrets", secretObj); err != nil {
 			slog.Error("failed to create kubeconfig secret", "cluster", req.Name, "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to create kubeconfig secret")
 			return

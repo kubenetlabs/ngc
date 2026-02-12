@@ -18,6 +18,8 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "ngf-console-agent.name" . }}
         app.kubernetes.io/component: heartbeat
+      annotations:
+        checksum/hub-secret: {{ include (print $.Template.BasePath "/secret-hub-connection.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "ngf-console-agent.serviceAccountName" . }}-heartbeat
       automountServiceAccountToken: true

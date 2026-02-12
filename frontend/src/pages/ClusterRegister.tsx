@@ -188,9 +188,19 @@ export default function ClusterRegister() {
               className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              This will be stored as a Kubernetes Secret on the hub cluster
+              This will be stored as a Kubernetes Secret on the hub cluster.
+              The kubeconfig must use a static token or certificate — exec-based
+              auth (e.g., <code className="text-[10px]">aws eks get-token</code>) will not work from the hub.
+              Use a ServiceAccount token instead.
             </p>
           </div>
+          {registerMutation.isError && (
+            <div className="rounded-md bg-red-500/10 p-3 text-sm text-red-500">
+              Registration failed:{" "}
+              {(registerMutation.error as Error)?.message ||
+                "Unknown error. Check the API logs."}
+            </div>
+          )}
           <div className="flex justify-between">
             <button
               onClick={() => setStep("info")}

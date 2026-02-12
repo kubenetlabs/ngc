@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Network,
@@ -18,6 +19,7 @@ import { fetchTopology } from "@/api/topology";
 import { fetchCertificates } from "@/api/certificates";
 import { fetchPolicies } from "@/api/policies";
 import { fetchAuditEntries } from "@/api/audit";
+import { fetchClusters } from "@/api/clusters";
 import { TopologyGraph } from "@/components/topology/TopologyGraph";
 import { useEdition } from "@/hooks/useEdition";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
@@ -311,6 +313,15 @@ function RecentActivityFeed() {
 function SingleClusterDashboard() {
   const { edition } = useEdition();
   const activeCluster = useActiveCluster();
+  const [topologyCluster, setTopologyCluster] = useState<string>("");
+
+  const { data: clusters } = useQuery({
+    queryKey: ["clusters"],
+    queryFn: fetchClusters,
+  });
+
+  // Resolve which cluster to use for topology: local override or active cluster.
+  const resolvedTopologyCluster = topologyCluster || activeCluster || undefined;
 
   const { data: gateways, isLoading: gwLoading } = useQuery({
     queryKey: ["gateways", activeCluster],
@@ -328,8 +339,8 @@ function SingleClusterDashboard() {
   });
 
   const { data: topology } = useQuery({
-    queryKey: ["topology", activeCluster],
-    queryFn: fetchTopology,
+    queryKey: ["topology", resolvedTopologyCluster],
+    queryFn: () => fetchTopology(resolvedTopologyCluster),
     refetchInterval: 30000,
   });
 
@@ -417,7 +428,23 @@ function SingleClusterDashboard() {
       {/* Topology Graph */}
       {topology && topology.nodes.length > 0 && (
         <div className="mt-6">
-          <h2 className="mb-3 text-lg font-semibold">Topology</h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Topology</h2>
+            {clusters && clusters.length > 1 && (
+              <select
+                value={topologyCluster}
+                onChange={(e) => setTopologyCluster(e.target.value)}
+                className="rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">Current cluster</option>
+                {clusters.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {c.displayName || c.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
           <TopologyGraph nodes={topology.nodes} edges={topology.edges} />
         </div>
       )}

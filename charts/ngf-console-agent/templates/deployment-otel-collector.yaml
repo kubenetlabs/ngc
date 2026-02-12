@@ -18,6 +18,8 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "ngf-console-agent.name" . }}
         app.kubernetes.io/component: otel-collector
+      annotations:
+        checksum/otel-config: {{ include (print $.Template.BasePath "/configmap-otel.yaml") . | sha256sum }}
     spec:
       securityContext:
         runAsNonRoot: true

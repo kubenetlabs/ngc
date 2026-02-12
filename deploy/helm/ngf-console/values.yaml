@@ -7,7 +7,7 @@ frontend:
   image:
     repository: danny2guns/ngf-console-frontend
     tag: "0.1.0"
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   resources:
     requests:
       cpu: 50m
@@ -21,7 +21,7 @@ api:
   image:
     repository: danny2guns/ngf-console-api
     tag: "0.1.0"
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   resources:
     requests:
       cpu: 100m
@@ -35,7 +35,7 @@ controller:
   image:
     repository: danny2guns/ngf-console-controller
     tag: "0.1.0"
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   resources:
     requests:
       cpu: 100m
@@ -51,7 +51,7 @@ operator:
   image:
     repository: danny2guns/ngf-console-operator
     tag: "0.1.0"
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   resources:
     requests:
       cpu: 100m
@@ -145,6 +145,11 @@ multiCluster:
   enabled: false
   hubClusterName: ""
   namespace: ngf-system
+  # Gateway reference for the HTTPRoute that exposes the hub API to agents.
+  # Required when multiCluster.enabled is true.
+  gatewayRef:
+    name: ""        # e.g., "llm-gateway" or "main-gateway"
+    namespace: ""   # e.g., "nginx-gateway"
   otel:
     externalPort: 4320
     service:

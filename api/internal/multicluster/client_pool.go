@@ -2,11 +2,13 @@ package multicluster
 
 import (
 	"context"
+	encoding_base64 "encoding/base64"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -194,6 +196,22 @@ func (p *ClientPool) CreateRaw(ctx context.Context, apiVersion, resource string,
 	return err
 }
 
+// CreateOrUpdateRaw creates a K8s resource, or updates it if it already exists.
+func (p *ClientPool) CreateOrUpdateRaw(ctx context.Context, apiVersion, resource string, obj map[string]interface{}) error {
+	gvr := schema.GroupVersionResource{Version: apiVersion, Resource: resource}
+	u := &unstructured.Unstructured{Object: obj}
+	_, err := p.hubDynamic.Resource(gvr).Namespace(p.namespace).Create(ctx, u, metav1.CreateOptions{})
+	if err != nil && errors.IsAlreadyExists(err) {
+		name := u.GetName()
+		_, err = p.hubDynamic.Resource(gvr).Namespace(p.namespace).Update(ctx, u, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("updating %s/%s: %w", resource, name, err)
+		}
+		return nil
+	}
+	return err
+}
+
 // DeleteRaw deletes an arbitrary K8s resource via the dynamic client.
 func (p *ClientPool) DeleteRaw(ctx context.Context, apiVersion, resource, name string) error {
 	gvr := schema.GroupVersionResource{Version: apiVersion, Resource: resource}
@@ -273,10 +291,16 @@ func (p *ClientPool) readKubeconfigSecret(ctx context.Context, secretName string
 		return nil, fmt.Errorf("secret has no data field")
 	}
 
-	// Try "kubeconfig" key first, then "value"
+	// Try "kubeconfig" key first, then "value".
+	// Secret .data values from the dynamic client are base64-encoded strings.
 	for _, key := range []string{"kubeconfig", "value"} {
 		if encoded, ok := data[key].(string); ok {
-			return []byte(encoded), nil
+			decoded, err := encoding_base64.StdEncoding.DecodeString(encoded)
+			if err != nil {
+				// If base64 decode fails, treat it as raw YAML (e.g. from stringData).
+				return []byte(encoded), nil
+			}
+			return decoded, nil
 		}
 	}
 
