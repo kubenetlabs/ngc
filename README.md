@@ -58,14 +58,36 @@ Web-based management platform for [NGINX Gateway Fabric](https://github.com/ngin
 | Controller | `controller/` | Route watcher, XC publish controller |
 | Migration CLI | `migration-cli/` | Cobra CLI for KIC-to-NGF migration |
 
+## Container Images
+
+Pre-built container images are available on Docker Hub:
+
+| Component | Image | Description |
+|-----------|-------|-------------|
+| API | `danny2guns/ngf-console-api:0.1.0` | Go API server |
+| Frontend | `danny2guns/ngf-console-frontend:0.1.0` | Nginx serving React build |
+| Operator | `danny2guns/ngf-console-operator:0.1.0` | CRD operator (controller-runtime) |
+
+```bash
+# Pull all images
+docker pull danny2guns/ngf-console-api:0.1.0
+docker pull danny2guns/ngf-console-frontend:0.1.0
+docker pull danny2guns/ngf-console-operator:0.1.0
+```
+
+These are the default images in the Helm chart. No `--set` overrides needed for a standard install.
+
 ## Prerequisites
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Go | 1.23+ | https://go.dev/dl/ |
+| Go | 1.25+ | https://go.dev/dl/ |
 | Node.js | 20+ | https://nodejs.org/ |
 | pnpm | 9+ | `npm install -g pnpm` |
 | kubectl | 1.28+ | https://kubernetes.io/docs/tasks/tools/ |
+| Helm | 3.12+ | https://helm.sh/docs/intro/install/ |
+
+Go and Node.js are only needed for local development. For Kubernetes deployment using the pre-built container images, only `kubectl` and `helm` are required.
 
 A Kubernetes cluster with NGINX Gateway Fabric installed is required for gateway features. Inference features work fully with mock data (no cluster needed).
 
@@ -132,40 +154,48 @@ docker compose -f deploy/docker-compose/docker-compose.yaml up
 
 ### Helm
 
+The Helm chart defaults to pulling pre-built images from Docker Hub (`danny2guns/ngf-console-*:0.1.0`).
+
 ```bash
 # Install CRDs first (persisted across helm upgrades/uninstalls)
 kubectl apply -f deploy/helm/ngf-console/crds/
 
 # Install the chart
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system \
+  --namespace ngf-console \
   --create-namespace
+
+# Verify
+kubectl get pods -n ngf-console
 ```
 
 Common overrides:
 
 ```bash
-# OSS edition, mock metrics
+# Minimal (no ClickHouse, no OTel, mock metrics)
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system --create-namespace \
-  --set clickhouse.enabled=false
+  --namespace ngf-console --create-namespace \
+  --set clickhouse.enabled=false \
+  --set otelCollector.enabled=false
 
 # Enterprise with Prometheus
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system --create-namespace \
+  --namespace ngf-console --create-namespace \
   --set ngf.edition=enterprise \
   --set prometheus.url=http://prometheus.monitoring:9090
 
 # External ClickHouse
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system --create-namespace \
+  --namespace ngf-console --create-namespace \
   --set clickhouse.enabled=false \
   --set api.clickhouseUrl=clickhouse.monitoring:9000
 
-# Custom ingress hostname
+# Custom image registry
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system --create-namespace \
-  --set ingress.hostname=console.mycompany.com
+  --namespace ngf-console --create-namespace \
+  --set api.image.repository=myregistry/ngf-console-api \
+  --set frontend.image.repository=myregistry/ngf-console-frontend \
+  --set operator.image.repository=myregistry/ngf-console-operator
 ```
 
 See [`docs/installation.md`](docs/installation.md) for full installation instructions and [`docs/configuration.md`](docs/configuration.md) for all configuration options.

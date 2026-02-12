@@ -57,7 +57,7 @@ ngf:
 frontend:
   replicas: 2
   image:
-    repository: registry.f5.com/ngf-console/frontend
+    repository: danny2guns/ngf-console-frontend
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   resources:
@@ -75,7 +75,7 @@ frontend:
 api:
   replicas: 2
   image:
-    repository: registry.f5.com/ngf-console/api
+    repository: danny2guns/ngf-console-api
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   resources:
@@ -95,7 +95,7 @@ operator:
   leaderElection: true         # Enable leader election for HA
   reconcileInterval: 60s       # Drift detection interval
   image:
-    repository: registry.f5.com/ngf-console/operator
+    repository: danny2guns/ngf-console-operator
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   resources:
@@ -113,7 +113,7 @@ operator:
 controller:
   replicas: 1
   image:
-    repository: registry.f5.com/ngf-console/controller
+    repository: danny2guns/ngf-console-controller
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   resources:

@@ -4,7 +4,7 @@
 
 | Tool | Version | Required for |
 |------|---------|--------------|
-| Go | 1.23+ | API, operator, controller, migration CLI |
+| Go | 1.25+ | API, operator, controller, migration CLI (only for local dev) |
 | Node.js | 20+ | Frontend |
 | pnpm | 9+ | Frontend |
 | kubectl | 1.28+ | Kubernetes interaction |
@@ -184,7 +184,19 @@ docker compose -f deploy/docker-compose/docker-compose.yaml down -v
 
 ## Option 5: Kubernetes with Helm
 
-Production deployment to a Kubernetes cluster.
+Production deployment to a Kubernetes cluster using pre-built container images from Docker Hub.
+
+### Container images
+
+The Helm chart uses the following Docker Hub images by default:
+
+| Component | Image |
+|-----------|-------|
+| API | `danny2guns/ngf-console-api:0.1.0` |
+| Frontend | `danny2guns/ngf-console-frontend:0.1.0` |
+| Operator | `danny2guns/ngf-console-operator:0.1.0` |
+
+No `--set` overrides are needed for image repositories -- the defaults in `values.yaml` point to Docker Hub.
 
 ### 1. Install CRDs
 
@@ -210,7 +222,7 @@ kubectl apply -f https://github.com/nginx/nginx-gateway-fabric/releases/download
 
 ```bash
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system \
+  --namespace ngf-console \
   --create-namespace
 ```
 
@@ -218,7 +230,7 @@ helm install ngf-console deploy/helm/ngf-console \
 
 ```bash
 # Check pods are running
-kubectl get pods -n ngf-system
+kubectl get pods -n ngf-console
 
 # Expected output:
 # ngf-console-api-xxxx          1/1     Running
@@ -228,7 +240,7 @@ kubectl get pods -n ngf-system
 # ngf-console-otel-collector-0  1/1     Running   (if enabled)
 
 # Check the API health endpoint
-kubectl port-forward -n ngf-system svc/ngf-console-api 8080:8080
+kubectl port-forward -n ngf-console svc/ngf-console-api 8080:8080
 curl http://localhost:8080/api/v1/health
 # {"status":"ok"}
 ```
@@ -237,7 +249,7 @@ curl http://localhost:8080/api/v1/health
 
 ```bash
 # Port forward the frontend
-kubectl port-forward -n ngf-system svc/ngf-console-frontend 3000:80
+kubectl port-forward -n ngf-console svc/ngf-console-frontend 3000:80
 
 # Open http://localhost:3000
 ```
@@ -247,43 +259,76 @@ Or configure an Ingress/Gateway route (see [Configuration Reference](configurati
 ### Common Helm overrides
 
 ```bash
-# OSS edition, no ClickHouse, mock metrics
+# Minimal install (no ClickHouse, no OTel, mock metrics)
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system --create-namespace \
-  --set ngf.edition=oss \
-  --set clickhouse.enabled=false
+  --namespace ngf-console --create-namespace \
+  --set clickhouse.enabled=false \
+  --set otelCollector.enabled=false
 
 # Enterprise with external Prometheus
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system --create-namespace \
+  --namespace ngf-console --create-namespace \
   --set ngf.edition=enterprise \
   --set prometheus.url=http://prometheus.monitoring:9090
 
 # External ClickHouse (don't deploy built-in)
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system --create-namespace \
+  --namespace ngf-console --create-namespace \
   --set clickhouse.enabled=false \
   --set api.clickhouseUrl=clickhouse.monitoring:9000
 
-# Custom ingress
+# Custom ingress hostname
 helm install ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system --create-namespace \
+  --namespace ngf-console --create-namespace \
   --set ingress.hostname=console.mycompany.com \
   --set ingress.tls.secretName=console-tls
+
+# Use custom image registry
+helm install ngf-console deploy/helm/ngf-console \
+  --namespace ngf-console --create-namespace \
+  --set api.image.repository=myregistry.example.com/ngf-console-api \
+  --set frontend.image.repository=myregistry.example.com/ngf-console-frontend \
+  --set operator.image.repository=myregistry.example.com/ngf-console-operator
+```
+
+### Building custom images
+
+To build and push your own images:
+
+```bash
+# Build for linux/amd64 (required for most cloud Kubernetes clusters)
+docker build --platform linux/amd64 -t myregistry/ngf-console-api:0.1.0 -f api/Dockerfile api/
+docker build --platform linux/amd64 -t myregistry/ngf-console-frontend:0.1.0 -f frontend/Dockerfile frontend/
+docker build --platform linux/amd64 -t myregistry/ngf-console-operator:0.1.0 -f operator/Dockerfile operator/
+
+# Push
+docker push myregistry/ngf-console-api:0.1.0
+docker push myregistry/ngf-console-frontend:0.1.0
+docker push myregistry/ngf-console-operator:0.1.0
+```
+
+Then install with your custom repository:
+
+```bash
+helm install ngf-console deploy/helm/ngf-console \
+  --namespace ngf-console --create-namespace \
+  --set api.image.repository=myregistry/ngf-console-api \
+  --set frontend.image.repository=myregistry/ngf-console-frontend \
+  --set operator.image.repository=myregistry/ngf-console-operator
 ```
 
 ### Upgrade
 
 ```bash
 helm upgrade ngf-console deploy/helm/ngf-console \
-  --namespace ngf-system
+  --namespace ngf-console
 ```
 
 ### Uninstall
 
 ```bash
 # Remove the Helm release (CRDs and their instances are preserved)
-helm uninstall ngf-console --namespace ngf-system
+helm uninstall ngf-console --namespace ngf-console
 
 # Optionally remove CRDs (WARNING: deletes all InferenceStack and GatewayBundle instances)
 kubectl delete -f deploy/helm/ngf-console/crds/

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.23+
+- Go 1.25+
 - Node.js 20+
 - pnpm 9+ (`npm install -g pnpm`)
 - A kubeconfig with access to a Kubernetes cluster (optional -- inference features work without one)
