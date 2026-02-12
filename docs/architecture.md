@@ -99,13 +99,6 @@ Kubernetes operator built with controller-runtime. Watches CRDs and reconciles c
 - **Self-healing**: Owns child resources via OwnerReference; recreates deleted children
 - **Status aggregation**: Computes phase (Ready/Pending/Degraded/Error) from child statuses
 
-### Controller (`controller/`)
-
-Supplementary controllers for cross-cluster and routing concerns.
-
-- **Route watcher**: Monitors Gateway API route resources for changes
-- **XC publish controller**: Manages F5 Distributed Cloud publish lifecycle
-
 ### Multi-Cluster System (`api/internal/multicluster/`)
 
 CRD-based multi-cluster management with the following sub-components:

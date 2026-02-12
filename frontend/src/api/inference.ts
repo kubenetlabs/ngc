@@ -7,6 +7,10 @@ import type {
   HistogramBucket,
   TimeseriesPoint,
   CostEstimate,
+  CreatePoolPayload,
+  UpdatePoolPayload,
+  EPPConfigPayload,
+  AutoscalingPayload,
 } from "@/types/inference";
 
 export async function fetchInferencePools(): Promise<InferencePoolWithGPU[]> {
@@ -64,5 +68,51 @@ export async function fetchKVCacheSeries(pool: string): Promise<TimeseriesPoint[
 
 export async function fetchCostEstimate(pool: string): Promise<CostEstimate> {
   const { data } = await apiClient.get<CostEstimate>("/inference/metrics/cost", { params: { pool } });
+  return data;
+}
+
+// Pool CRUD operations (routed through InferenceStack CRDs)
+
+export async function createInferencePool(payload: CreatePoolPayload) {
+  const { data } = await apiClient.post("/inference/pools", payload);
+  return data;
+}
+
+export async function updateInferencePool(name: string, payload: UpdatePoolPayload) {
+  const { data } = await apiClient.put(`/inference/pools/${name}`, payload);
+  return data;
+}
+
+export async function deleteInferencePool(name: string) {
+  const { data } = await apiClient.delete(`/inference/pools/${name}`);
+  return data;
+}
+
+export async function deployInferencePool(name: string) {
+  const { data } = await apiClient.post(`/inference/pools/${name}/deploy`);
+  return data;
+}
+
+// EPP configuration
+
+export async function fetchEPPConfig(pool: string): Promise<EPPConfigPayload> {
+  const { data } = await apiClient.get<EPPConfigPayload>("/inference/epp", { params: { pool } });
+  return data;
+}
+
+export async function updateEPPConfig(payload: EPPConfigPayload) {
+  const { data } = await apiClient.put("/inference/epp", payload);
+  return data;
+}
+
+// Autoscaling configuration
+
+export async function fetchAutoscaling(pool: string): Promise<AutoscalingPayload> {
+  const { data } = await apiClient.get<AutoscalingPayload>("/inference/autoscaling", { params: { pool } });
+  return data;
+}
+
+export async function updateAutoscaling(payload: AutoscalingPayload) {
+  const { data } = await apiClient.put("/inference/autoscaling", payload);
   return data;
 }

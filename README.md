@@ -60,7 +60,7 @@ Web-based management platform for [NGINX Gateway Fabric](https://github.com/ngin
 | Frontend | `frontend/` | React 18 + TypeScript + Vite + Tailwind CSS |
 | API Server | `api/` | Go + Chi router + WebSocket hub |
 | Operator | `operator/` | controller-runtime, reconciles InferenceStack and GatewayBundle CRDs |
-| Controller | `controller/` | Route watcher, XC publish controller |
+| Agent | `agent/` | Workload cluster heartbeat reporter |
 | Migration CLI | `migration-cli/` | Cobra CLI for KIC-to-NGF migration |
 | Agent Chart | `charts/ngf-console-agent/` | Helm chart for workload cluster agents (operator, heartbeat, OTel forwarder) |
 
@@ -298,7 +298,8 @@ ngc/
     cmd/                        # Operator entry point
     internal/controller/        # Reconciliation controllers
     config/crd/bases/           # Generated CRD YAML
-  controller/                   # Route watcher + XC publish controller
+  agent/                        # Workload cluster agent
+    cmd/heartbeat/              # Heartbeat reporter binary
   migration-cli/                # KIC migration CLI (cobra)
     cmd/                        # scan, plan, apply, validate commands
   charts/

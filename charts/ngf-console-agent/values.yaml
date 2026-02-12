@@ -14,7 +14,7 @@ operator:
   image:
     repository: danny2guns/ngf-console-operator
     tag: "0.1.0"
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   resources:
     requests:
       cpu: 100m
@@ -28,7 +28,7 @@ heartbeat:
   image:
     repository: danny2guns/ngf-console-agent-heartbeat
     tag: "0.1.0"
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   intervalSeconds: 30
   resources:
     requests:

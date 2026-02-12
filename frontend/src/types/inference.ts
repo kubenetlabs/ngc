@@ -107,3 +107,46 @@ export interface TimeseriesPoint {
 export interface InferencePoolWithGPU extends InferencePool {
   avgGpuUtil: number;
 }
+
+// Pool CRUD payloads
+
+export interface CreatePoolPayload {
+  name: string;
+  namespace: string;
+  modelName: string;
+  modelVersion?: string;
+  servingBackend: string;
+  gpuType: string;
+  gpuCount: number;
+  replicas: number;
+  minReplicas?: number;
+  maxReplicas?: number;
+  selector?: Record<string, string>;
+  epp?: { strategy: string; weights?: { queueDepth: number; kvCache: number; prefixAffinity: number } };
+}
+
+export interface UpdatePoolPayload {
+  modelName?: string;
+  modelVersion?: string;
+  servingBackend?: string;
+  gpuType?: string;
+  gpuCount?: number;
+  replicas?: number;
+  minReplicas?: number;
+  maxReplicas?: number;
+  selector?: Record<string, string>;
+  epp?: { strategy: string; weights?: { queueDepth: number; kvCache: number; prefixAffinity: number } };
+}
+
+export interface EPPConfigPayload {
+  pool: string;
+  strategy: string;
+  weights?: { queueDepth: number; kvCache: number; prefixAffinity: number };
+}
+
+export interface AutoscalingPayload {
+  pool: string;
+  minReplicas: number;
+  maxReplicas: number;
+  replicas: number;
+}

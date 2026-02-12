@@ -9,6 +9,9 @@ bin/
 *.out
 vendor/
 
+# Compiled binaries
+agent/heartbeat
+
 # Node / Frontend
 node_modules/
 dist/

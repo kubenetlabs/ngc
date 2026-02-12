@@ -427,7 +427,49 @@ spec:
 EOF
 ```
 
-#### 5. Install the agent on the workload cluster
+#### 5. Expose hub endpoints for agent connectivity
+
+Before installing agents, the hub must expose two endpoints that workload clusters can reach:
+
+1. **Hub API** -- used by the heartbeat reporter (HTTP, port 80/443)
+2. **Hub OTel Collector** -- used by the telemetry forwarder (gRPC, port 4317)
+
+These are **separate services**. The API is typically already exposed via an Ingress or Gateway. The OTel Collector is a ClusterIP service by default and must be explicitly exposed.
+
+**Expose the hub OTel Collector:**
+
+```bash
+# Option A: LoadBalancer (AWS/GCP/Azure)
+kubectl patch svc ngf-console-otel-collector -n ngf-console \
+  -p '{"spec":{"type":"LoadBalancer"}}'
+
+# Wait for the external address to be assigned
+kubectl get svc ngf-console-otel-collector -n ngf-console -w
+
+# Option B: NodePort
+kubectl patch svc ngf-console-otel-collector -n ngf-console \
+  -p '{"spec":{"type":"NodePort"}}'
+```
+
+Note the external address -- you will use it as `hub.otelEndpoint` when installing agents.
+
+> **Common mistake:** Using the same LB address for both `hub.apiEndpoint` and `hub.otelEndpoint`. They are different services. The API LB serves HTTP on port 80; the OTel Collector LB serves gRPC on port 4317. Using the API LB address for the OTel endpoint will result in connection timeouts.
+
+**Verify hub endpoints are reachable** (from your local machine or a workload cluster node):
+
+```bash
+# API endpoint (should return 200)
+curl -s -o /dev/null -w "%{http_code}" https://hub.example.com/api/v1/health
+
+# OTel endpoint (should connect without timeout)
+# Using grpcurl:
+grpcurl -plaintext <otel-lb-address>:4317 list
+
+# Or a simple TCP check:
+nc -zv <otel-lb-address> 4317
+```
+
+#### 6. Install the agent on the workload cluster
 
 Get the agent install command from the API:
 
@@ -442,16 +484,21 @@ helm install ngf-console-agent charts/ngf-console-agent \
   --namespace ngf-system --create-namespace \
   --set cluster.name=workload-west \
   --set hub.apiEndpoint=https://hub.example.com \
-  --set hub.otelEndpoint=hub.example.com:4317 \
+  --set hub.otelEndpoint=<otel-lb-address>:4317 \
   --kube-context <workload-cluster-context>
 ```
 
+| Helm Value | Points To | Protocol | Example |
+|------------|-----------|----------|---------|
+| `hub.apiEndpoint` | Hub API service (LB/Ingress) | HTTP(S) | `https://hub.example.com` |
+| `hub.otelEndpoint` | Hub OTel Collector service (LB) | gRPC | `otel-lb.us-east-1.elb.amazonaws.com:4317` |
+
 The agent chart installs three components:
 - **Operator**: Reconciles InferenceStack and GatewayBundle CRDs on the workload cluster
-- **Heartbeat Reporter**: Sends health data to the hub every 30 seconds
-- **OTel Forwarder**: Forwards telemetry to the hub with `cluster_name` tagging
+- **Heartbeat Reporter**: Sends health data to the hub API every 30 seconds
+- **OTel Forwarder**: Forwards telemetry to the hub OTel Collector with `cluster_name` tagging
 
-#### 6. Verify
+#### 7. Verify
 
 ```bash
 # Check agent pods on the workload cluster
@@ -613,6 +660,12 @@ wscat -c ws://localhost:8080/api/v1/ws/inference/epp-decisions
 - **Cluster shows "connected: false"**: Check that the kubeconfig Secret exists and contains a valid kubeconfig. Verify the workload cluster is reachable from the hub. Check API server logs for circuit breaker state.
 - **Agent heartbeat not received**: Verify agent pods are running on the workload cluster (`kubectl get pods -n ngf-system`). Check the heartbeat deployment logs. Ensure the hub API endpoint is reachable from the workload cluster.
 - **"cluster not found or circuit breaker open"**: The circuit breaker opens after 3 consecutive health check failures. It resets automatically after 30 seconds. Check the workload cluster's network connectivity.
+
+### Agent pods crash-looping
+
+- **OTel collector crash-looping with "i/o timeout" to hub endpoint**: The `hub.otelEndpoint` is unreachable. Verify the hub's OTel Collector service is exposed externally (LoadBalancer or NodePort) and that the agent's `hub.otelEndpoint` points to the OTel Collector LB -- not the API LB. The API LB does not forward port 4317.
+- **Heartbeat crash-looping with readiness probe failures**: Ensure the agent is running the latest image. If using a fixed tag (e.g., `0.1.0`), set `heartbeat.image.pullPolicy=Always` in the agent chart to avoid stale cached images on nodes.
+- **OTel collector crash-looping with readiness probe on port 13133**: The OTel config may be missing the `health_check` extension. Verify the ConfigMap includes `extensions: health_check` and the service block includes `extensions: [health_check]`.
 
 ### Operator pods crash-looping
 

@@ -68,6 +68,20 @@ func main() {
 		"interval", interval.String(),
 	)
 
+	// Start health probe server.
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	healthMux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	go func() {
+		if err := http.ListenAndServe(":8081", healthMux); err != nil {
+			slog.Error("health server failed", "error", err)
+		}
+	}()
+
 	cfg, err := buildConfig(*kubeconfig)
 	if err != nil {
 		slog.Error("failed to build kubernetes config", "error", err)

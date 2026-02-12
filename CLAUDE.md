@@ -2,13 +2,14 @@
 
 ## Project Overview
 
-NGF Console is a web-based management platform for NGINX Gateway Fabric with native Kubernetes Gateway Inference Extensions support. Monorepo with four components: frontend, API, controller, migration CLI.
+NGF Console is a web-based management platform for NGINX Gateway Fabric with native Kubernetes Gateway Inference Extensions support. Monorepo with five components: frontend, API, operator, agent, migration CLI.
 
 ## Tech Stack
 
 - **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui
 - **Backend API**: Go + Chi router + gorilla/websocket + client-go
-- **Controller**: Go + controller-runtime
+- **Operator**: Go + controller-runtime
+- **Agent**: Go + client-go (heartbeat reporter)
 - **Migration CLI**: Go + cobra
 - **Analytics DB**: ClickHouse
 - **Config DB**: PostgreSQL (prod) / SQLite (dev)
@@ -32,11 +33,12 @@ cd frontend && pnpm lint                    # ESLint
 cd frontend && pnpm test                    # Vitest
 ```
 
-### Go (API / Controller / Migration CLI)
+### Go (API / Operator / Agent / Migration CLI)
 ```bash
 cd api && go build ./...                    # Build API
 cd api && go test ./...                     # Test API
-cd controller && go build ./...             # Build controller
+cd operator && go build ./cmd/              # Build operator
+cd agent && go build ./cmd/heartbeat        # Build agent heartbeat
 cd migration-cli && go build ./...          # Build migration CLI
 golangci-lint run ./...                     # Lint Go code
 ```

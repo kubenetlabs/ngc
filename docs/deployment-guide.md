@@ -53,24 +53,47 @@ helm install ngf-console deploy/helm/ngf-console \
 
 ## Kubernetes -- Workload cluster agent
 
-Install the agent chart on each workload cluster:
+### Hub prerequisites
+
+Before installing any agents, expose the hub's OTel Collector so workload clusters can forward telemetry. This is a separate service from the API.
+
+```bash
+# Expose the hub OTel Collector (default is ClusterIP -- agents cannot reach it)
+kubectl patch svc ngf-console-otel-collector -n ngf-console \
+  -p '{"spec":{"type":"LoadBalancer"}}'
+
+# Get the external address (wait for EXTERNAL-IP to populate)
+kubectl get svc ngf-console-otel-collector -n ngf-console
+```
+
+### Install the agent
 
 ```bash
 helm install ngf-console-agent charts/ngf-console-agent \
   --namespace ngf-system --create-namespace \
   --set cluster.name=workload-west \
   --set hub.apiEndpoint=https://hub.example.com \
-  --set hub.otelEndpoint=hub.example.com:4317
+  --set hub.otelEndpoint=<otel-collector-lb-address>:4317
 ```
+
+> **Important:** `hub.apiEndpoint` and `hub.otelEndpoint` point to different services. The API endpoint is the hub's HTTP LB/Ingress. The OTel endpoint is the OTel Collector LB on port 4317 (gRPC). Using the API LB address for `hub.otelEndpoint` will fail.
 
 The agent installs:
 - **Operator** -- reconciles InferenceStack and GatewayBundle CRDs locally
-- **Heartbeat reporter** -- sends health to hub every 30s
-- **OTel forwarder** -- forwards telemetry to hub with `cluster_name` tagging
+- **Heartbeat reporter** -- sends health to hub API every 30s
+- **OTel forwarder** -- forwards telemetry to hub OTel Collector with `cluster_name` tagging
 
-Verify agent pods:
+### Verify
+
 ```bash
+# Agent pods should all be 1/1 Running
 kubectl get pods -n ngf-system
+
+# Check OTel forwarder logs for connectivity (no connection errors = healthy)
+kubectl logs -n ngf-system deploy/ngf-console-agent-otel-collector --tail=5
+
+# Check heartbeat is reaching the hub (should show "heartbeat sent" with status 200)
+kubectl logs -n ngf-system deploy/ngf-console-agent-heartbeat --tail=5
 ```
 
 ## Upgrade
@@ -105,5 +128,7 @@ kubectl delete -f deploy/helm/ngf-console/crds/
 - [ ] Configure alert webhooks (`--alert-webhooks`)
 - [ ] Use a private container registry for images
 - [ ] Verify agent RBAC: operator has write access, heartbeat has read-only
-- [ ] Ensure hub OTel Collector port 4317 is reachable from workload clusters
+- [ ] Expose hub OTel Collector as LoadBalancer/NodePort before installing agents
+- [ ] Verify `hub.otelEndpoint` points to the OTel Collector LB (not the API LB)
 - [ ] Verify hub API endpoint is reachable from workload clusters (for heartbeats)
+- [ ] Test port 4317 connectivity from a workload cluster to the hub OTel Collector LB

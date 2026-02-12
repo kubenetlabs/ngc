@@ -5,11 +5,13 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/kubenetlabs/ngc/operator/api/v1alpha1"
@@ -40,6 +42,7 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
+	crlog.SetLogger(logr.FromSlogHandler(logger.Handler()))
 
 	slog.Info("starting ngf-console operator")
 
