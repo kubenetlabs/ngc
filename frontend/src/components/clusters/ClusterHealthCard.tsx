@@ -55,7 +55,7 @@ export function ClusterHealthCard({ cluster, onClick }: Props) {
         <div>
           <span className="text-muted-foreground">Agent</span>
           <p className="font-medium text-foreground">
-            {cluster.agentInstalled ? "Installed" : "—"}
+            {cluster.isLocal ? "Hub" : cluster.agentInstalled ? "Installed" : "—"}
           </p>
         </div>
       </div>
