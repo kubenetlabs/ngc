@@ -74,6 +74,7 @@ export default function InferencePoolCreate() {
 
   const mutation = useMutation({
     mutationFn: createInferenceStack,
+    retry: false,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["inference-pools"] });
       queryClient.invalidateQueries({ queryKey: ["inference-stacks"] });
@@ -367,7 +368,7 @@ export default function InferencePoolCreate() {
         {/* Error display */}
         {mutation.isError && (
           <div className="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            {String(mutation.error)}
+            {(mutation.error as any)?.response?.data?.error || String(mutation.error)}
           </div>
         )}
 
