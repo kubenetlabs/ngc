@@ -200,11 +200,17 @@ func (s *metricsScraper) scrapePoolInCluster(ctx context.Context, cc *mc.Cluster
 
 		// Compute counter deltas.
 		key := fmt.Sprintf("%s/%s/%s", cc.Name, ns, podName)
-		tokensDelta, ttftAvg := s.updateCounters(key, pm)
+		tokensDelta, computedTPS, ttftAvg := s.updateCounters(key, pm)
+
+		// Prefer computed TPS from token deltas; fall back to Prometheus gauge.
+		podTPS := computedTPS
+		if podTPS == 0 {
+			podTPS = pm.tps
+		}
 
 		// Accumulate for pool-level aggregation.
 		totalTTFT += ttftAvg
-		totalTPS += pm.tps
+		totalTPS += podTPS
 		totalTokens += tokensDelta
 		totalQueue += float64(pm.queueDepth)
 		totalKV += pm.kvCachePct
@@ -296,6 +302,7 @@ func (s *metricsScraper) parseVLLMMetrics(body, clusterName, poolName, podName, 
 		"vllm_num_requests_running",
 	))
 	pm.kvCachePct = firstFound(body,
+		"vllm:kv_cache_usage_perc",
 		"vllm:gpu_cache_usage_perc",
 		"vllm_gpu_cache_usage_perc",
 	) * 100 // 0-1 → 0-100
@@ -325,17 +332,19 @@ func (s *metricsScraper) parseVLLMMetrics(body, clusterName, poolName, podName, 
 }
 
 // updateCounters computes deltas under the lock and updates stored state.
-// Returns (tokensDelta, ttftAvgMs).
-func (s *metricsScraper) updateCounters(key string, pm parsedPodMetrics) (uint64, float64) {
+// Returns (tokensDelta, tps, ttftAvgMs).
+func (s *metricsScraper) updateCounters(key string, pm parsedPodMetrics) (uint64, float64, float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	now := time.Now()
 	c, ok := s.counters[key]
 	if !ok {
 		c = &podCounters{}
 		s.counters[key] = c
 	}
-	c.lastSeen = time.Now()
+	elapsed := now.Sub(c.lastSeen).Seconds()
+	c.lastSeen = now
 
 	// Token counter delta — skip on first observation or counter reset.
 	var tokensDelta uint64
@@ -343,6 +352,12 @@ func (s *metricsScraper) updateCounters(key string, pm parsedPodMetrics) (uint64
 		tokensDelta = uint64(pm.tokensTotal - c.prevTokensTotal)
 	}
 	c.prevTokensTotal = pm.tokensTotal
+
+	// Compute TPS from token delta / elapsed time.
+	var tps float64
+	if tokensDelta > 0 && elapsed > 0 {
+		tps = float64(tokensDelta) / elapsed
+	}
 
 	// TTFT histogram delta — compute average over interval.
 	var ttftAvg float64
@@ -354,7 +369,7 @@ func (s *metricsScraper) updateCounters(key string, pm parsedPodMetrics) (uint64
 	c.prevTTFTSum = pm.ttftSum
 	c.prevTTFTCount = pm.ttftCount
 
-	return tokensDelta, ttftAvg
+	return tokensDelta, tps, ttftAvg
 }
 
 // firstFound returns the value of the first metric name found in the body.

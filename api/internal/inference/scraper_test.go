@@ -158,11 +158,14 @@ func TestUpdateCounters_FirstObservation(t *testing.T) {
 		ttftCount:   100,
 	}
 
-	tokensDelta, ttftAvg := s.updateCounters("test/ns/pod-0", pm)
+	tokensDelta, tps, ttftAvg := s.updateCounters("test/ns/pod-0", pm)
 
 	// First observation: no delta should be computed.
 	if tokensDelta != 0 {
 		t.Errorf("first observation tokensDelta = %d, want 0", tokensDelta)
+	}
+	if tps != 0 {
+		t.Errorf("first observation tps = %f, want 0", tps)
 	}
 	if ttftAvg != 0 {
 		t.Errorf("first observation ttftAvg = %f, want 0", ttftAvg)
@@ -181,7 +184,7 @@ func TestUpdateCounters_NormalDelta(t *testing.T) {
 	})
 
 	// Second observation — should compute deltas.
-	tokensDelta, ttftAvg := s.updateCounters(key, parsedPodMetrics{
+	tokensDelta, tps, ttftAvg := s.updateCounters(key, parsedPodMetrics{
 		tokensTotal: 1500,
 		ttftSum:     7.5,
 		ttftCount:   150,
@@ -189,6 +192,9 @@ func TestUpdateCounters_NormalDelta(t *testing.T) {
 
 	if tokensDelta != 500 {
 		t.Errorf("tokensDelta = %d, want 500", tokensDelta)
+	}
+	if tps <= 0 {
+		t.Errorf("tps = %f, want > 0", tps)
 	}
 	// ttftAvg = ((7.5 - 5.0) / (150 - 100)) * 1000 = (2.5 / 50) * 1000 = 50ms
 	if math.Abs(ttftAvg-50.0) > 0.01 {
@@ -208,7 +214,7 @@ func TestUpdateCounters_CounterReset(t *testing.T) {
 	})
 
 	// Pod restarts — counters reset to low values.
-	tokensDelta, ttftAvg := s.updateCounters(key, parsedPodMetrics{
+	tokensDelta, _, ttftAvg := s.updateCounters(key, parsedPodMetrics{
 		tokensTotal: 100,
 		ttftSum:     0.5,
 		ttftCount:   10,
@@ -223,7 +229,7 @@ func TestUpdateCounters_CounterReset(t *testing.T) {
 	}
 
 	// Next normal observation after reset should work.
-	tokensDelta, ttftAvg = s.updateCounters(key, parsedPodMetrics{
+	tokensDelta, _, ttftAvg = s.updateCounters(key, parsedPodMetrics{
 		tokensTotal: 200,
 		ttftSum:     1.5,
 		ttftCount:   30,
@@ -245,7 +251,7 @@ func TestUpdateCounters_ZeroTokensDelta(t *testing.T) {
 	s.updateCounters(key, parsedPodMetrics{tokensTotal: 1000})
 
 	// Same value (no new tokens).
-	tokensDelta, _ := s.updateCounters(key, parsedPodMetrics{tokensTotal: 1000})
+	tokensDelta, _, _ := s.updateCounters(key, parsedPodMetrics{tokensTotal: 1000})
 	if tokensDelta != 0 {
 		t.Errorf("same-value tokensDelta = %d, want 0", tokensDelta)
 	}
