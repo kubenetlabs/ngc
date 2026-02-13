@@ -247,7 +247,7 @@ func (p *Provider) GetCostEstimate(ctx context.Context, pool string) (*inference
 		hourlyRate = 1.00
 	}
 
-	replicaCount := ps.Replicas
+	replicaCount := int(ps.Replicas)
 	totalHourly := hourlyRate * float64(replicaCount) * float64(ps.GPUCount)
 
 	return &inference.CostEstimate{

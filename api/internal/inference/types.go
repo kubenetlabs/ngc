@@ -10,11 +10,11 @@ type PoolStatus struct {
 	ModelVersion   string            `json:"modelVersion,omitempty"`
 	ServingBackend string            `json:"servingBackend"`
 	GPUType        string            `json:"gpuType"`
-	GPUCount       int               `json:"gpuCount"`
-	Replicas       int               `json:"replicas"`
-	ReadyReplicas  int               `json:"readyReplicas"`
-	MinReplicas    int               `json:"minReplicas"`
-	MaxReplicas    int               `json:"maxReplicas"`
+	GPUCount       uint32            `json:"gpuCount"`
+	Replicas       uint32            `json:"replicas"`
+	ReadyReplicas  uint32            `json:"readyReplicas"`
+	MinReplicas    uint32            `json:"minReplicas"`
+	MaxReplicas    uint32            `json:"maxReplicas"`
 	Selector       map[string]string `json:"selector"`
 	AvgGPUUtil     float64           `json:"avgGpuUtil"`
 	Status         string            `json:"status"`

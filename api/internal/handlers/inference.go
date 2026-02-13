@@ -523,17 +523,17 @@ func toInferencePoolResponse(p inference.PoolStatus) InferencePoolResponse {
 		ModelVersion:   p.ModelVersion,
 		ServingBackend: p.ServingBackend,
 		GPUType:        p.GPUType,
-		GPUCount:       p.GPUCount,
-		Replicas:       p.Replicas,
-		MinReplicas:    p.MinReplicas,
-		MaxReplicas:    p.MaxReplicas,
+		GPUCount:       int(p.GPUCount),
+		Replicas:       int(p.Replicas),
+		MinReplicas:    int(p.MinReplicas),
+		MaxReplicas:    int(p.MaxReplicas),
 		Selector:       p.Selector,
 		AvgGPUUtil:     p.AvgGPUUtil,
 		CreatedAt:      formatTime(p.CreatedAt),
 	}
 	resp.Status = &InferencePoolStatusResponse{
-		ReadyReplicas: p.ReadyReplicas,
-		TotalReplicas: p.Replicas,
+		ReadyReplicas: int(p.ReadyReplicas),
+		TotalReplicas: int(p.Replicas),
 		Conditions: []ConditionResponse{
 			{Type: "Ready", Status: p.Status, Reason: p.Status, Message: ""},
 		},

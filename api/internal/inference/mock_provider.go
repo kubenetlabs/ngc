@@ -126,12 +126,12 @@ func (m *MockProvider) GetPodMetrics(_ context.Context, pool string) ([]PodMetri
 		return nil, fmt.Errorf("pool %q not found", pool)
 	}
 
-	pods := make([]PodMetrics, p.Replicas)
+	pods := make([]PodMetrics, int(p.Replicas))
 	for i := range pods {
 		pods[i] = PodMetrics{
 			PodName:          fmt.Sprintf("%s-pod-%d", pool, i),
 			NodeName:         fmt.Sprintf("gpu-node-%d", i%3),
-			GPUID:            i % p.GPUCount,
+			GPUID:            i % int(p.GPUCount),
 			GPUType:          p.GPUType,
 			QueueDepth:       m.varyInt(5, 4),
 			KVCacheUtilPct:   m.varyFloat(60, 20),
@@ -154,7 +154,7 @@ func (m *MockProvider) GetRecentEPPDecisions(_ context.Context, pool string, lim
 	p := m.findPool(pool)
 	replicas := 4
 	if p != nil {
-		replicas = p.Replicas
+		replicas = int(p.Replicas)
 	}
 
 	decisions := make([]EPPDecision, limit)
@@ -220,7 +220,7 @@ func (m *MockProvider) GetCostEstimate(_ context.Context, pool string) (*CostEst
 	hourly := rates[p.GPUType] * float64(p.GPUCount)
 	return &CostEstimate{
 		GPUType:      p.GPUType,
-		ReplicaCount: p.Replicas,
+		ReplicaCount: int(p.Replicas),
 		HourlyRate:   hourly * float64(p.Replicas),
 		DailyCost:    hourly * float64(p.Replicas) * 24,
 		MonthlyCost:  hourly * float64(p.Replicas) * 24 * 30,
