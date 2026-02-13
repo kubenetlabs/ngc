@@ -35,11 +35,11 @@ func registerEPPDecisions(hub *Hub, provider inference.MetricsProvider) {
 		decisions, err := provider.GetRecentEPPDecisions(ctx, "", 1)
 		if err != nil {
 			slog.Debug("ws epp-decisions: query failed", "error", err)
-			return json.Marshal([]interface{}{})
+			return nil, nil
 		}
 
 		if len(decisions) == 0 {
-			return json.Marshal([]interface{}{})
+			return nil, nil
 		}
 
 		mu.Lock()
@@ -50,8 +50,8 @@ func registerEPPDecisions(hub *Hub, provider inference.MetricsProvider) {
 		mu.Unlock()
 
 		if seen {
-			// No new decision since last broadcast; send empty array.
-			return json.Marshal([]interface{}{})
+			// No new decision since last broadcast; skip.
+			return nil, nil
 		}
 
 		return json.Marshal(decisions[0])

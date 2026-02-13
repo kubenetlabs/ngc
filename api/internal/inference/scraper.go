@@ -42,6 +42,8 @@ const insertPodMetrics = `INSERT INTO ngf_pod_metrics (
 
 var podGVR = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 
+const dcgmMetricsPort = 9400
+
 // podCounters tracks previous counter values for computing deltas.
 type podCounters struct {
 	prevTokensTotal float64
@@ -57,8 +59,9 @@ type metricsScraper struct {
 	provider   MetricsProvider
 	httpClient *http.Client
 
-	mu       sync.Mutex
-	counters map[string]*podCounters // key: "cluster/namespace/podName"
+	mu          sync.Mutex
+	counters    map[string]*podCounters // key: "cluster/namespace/podName"
+	dcgmPodIPs  map[string]string       // key: nodeName, value: DCGM pod IP
 }
 
 // RunMetricsScraper starts a loop that scrapes vLLM pod metrics and writes
@@ -69,7 +72,8 @@ func RunMetricsScraper(ctx context.Context, pool *mc.ClientPool, conn DBConn, pr
 		conn:       conn,
 		provider:   provider,
 		httpClient: &http.Client{Timeout: 5 * time.Second},
-		counters:   make(map[string]*podCounters),
+		counters:    make(map[string]*podCounters),
+		dcgmPodIPs:  make(map[string]string),
 	}
 
 	slog.Info("metrics scraper starting", "interval", interval)
@@ -105,6 +109,7 @@ func (s *metricsScraper) scrapeAll(ctx context.Context) {
 	}
 
 	for _, cc := range clusters {
+		s.refreshDCGMPods(ctx, cc)
 		for i := range pools {
 			s.scrapePoolInCluster(ctx, cc, &pools[i])
 		}
@@ -196,6 +201,7 @@ func (s *metricsScraper) scrapePoolInCluster(ctx context.Context, cc *mc.Cluster
 		}
 
 		pm := s.parseVLLMMetrics(body, cc.Name, pool.Name, podName, nodeName)
+		s.applyDCGMMetrics(ctx, nodeName, &pm)
 		podCount++
 
 		// Compute counter deltas.
@@ -221,7 +227,7 @@ func (s *metricsScraper) scrapePoolInCluster(ctx context.Context, cc *mc.Cluster
 			now, cc.Name, pool.Name, podName, nodeName,
 			uint8(0), pool.GPUType,
 			uint16(pm.queueDepth), pm.kvCachePct, uint8(0), pm.gpuUtilPct,
-			uint32(0), uint32(0), uint16(0), uint16(pm.requestsInFlight),
+			pm.gpuMemUsedMB, pm.gpuMemTotalMB, pm.gpuTemperatureC, uint16(pm.requestsInFlight),
 		); err != nil {
 			slog.Warn("scraper: failed to insert pod metrics", "pod", podName, "error", err)
 		}
@@ -271,6 +277,101 @@ func (s *metricsScraper) fetchMetrics(ctx context.Context, podIP string) (string
 	return string(b), nil
 }
 
+// refreshDCGMPods discovers DCGM exporter pods across all namespaces and maps
+// their pod IPs by the node they run on. This avoids reliance on hostPort which
+// may not be reachable depending on the CNI.
+func (s *metricsScraper) refreshDCGMPods(ctx context.Context, cc *mc.ClusterClient) {
+	dc := cc.K8sClient.DynamicClient()
+	if dc == nil {
+		return
+	}
+
+	listCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Search for DCGM exporter pods by label in all namespaces.
+	podList, err := dc.Resource(podGVR).Namespace("").List(listCtx, metav1.ListOptions{
+		LabelSelector: "app=dcgm-exporter",
+	})
+	if err != nil {
+		slog.Warn("scraper: failed to list DCGM pods", "cluster", cc.Name, "error", err)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	found := 0
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		phase, _, _ := unstructured.NestedString(pod.Object, "status", "phase")
+		if phase != "Running" {
+			continue
+		}
+		nodeName, _, _ := unstructured.NestedString(pod.Object, "spec", "nodeName")
+		podIP, _, _ := unstructured.NestedString(pod.Object, "status", "podIP")
+		if nodeName != "" && podIP != "" {
+			s.dcgmPodIPs[nodeName] = podIP
+			found++
+		}
+	}
+	if found > 0 {
+		slog.Debug("scraper: discovered DCGM pods", "cluster", cc.Name, "count", found)
+	}
+}
+
+// fetchDCGMMetrics fetches DCGM exporter metrics from a node's IP on port 9400.
+func (s *metricsScraper) fetchDCGMMetrics(ctx context.Context, nodeIP string) (string, error) {
+	url := fmt.Sprintf("http://%s:%d/metrics", nodeIP, dcgmMetricsPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// applyDCGMMetrics fetches DCGM metrics for the given node and populates GPU fields on pm.
+func (s *metricsScraper) applyDCGMMetrics(ctx context.Context, nodeName string, pm *parsedPodMetrics) {
+	s.mu.Lock()
+	dcgmIP, ok := s.dcgmPodIPs[nodeName]
+	s.mu.Unlock()
+	if !ok || dcgmIP == "" {
+		return
+	}
+
+	body, err := s.fetchDCGMMetrics(ctx, dcgmIP)
+	if err != nil {
+		slog.Debug("scraper: DCGM fetch failed", "node", nodeName, "dcgmIP", dcgmIP, "error", err)
+		return
+	}
+
+	// GPU utilization — prefer DCGM over any value already parsed from vLLM.
+	if gpuUtil := firstFound(body, "DCGM_FI_DEV_GPU_UTIL"); gpuUtil > 0 || pm.gpuUtilPct == 0 {
+		pm.gpuUtilPct = gpuUtil
+	}
+
+	// Framebuffer memory (in MB).
+	pm.gpuMemUsedMB = uint32(firstFound(body, "DCGM_FI_DEV_FB_USED"))
+	fbFree := uint32(firstFound(body, "DCGM_FI_DEV_FB_FREE"))
+	pm.gpuMemTotalMB = pm.gpuMemUsedMB + fbFree
+
+	// Temperature.
+	pm.gpuTemperatureC = uint16(firstFound(body, "DCGM_FI_DEV_GPU_TEMP"))
+}
+
 // parsedPodMetrics holds raw scraped values for a single pod.
 type parsedPodMetrics struct {
 	tps              float64
@@ -278,6 +379,11 @@ type parsedPodMetrics struct {
 	requestsInFlight int
 	kvCachePct       float64
 	gpuUtilPct       float64
+
+	// DCGM node-level GPU metrics.
+	gpuMemUsedMB  uint32
+	gpuMemTotalMB uint32
+	gpuTemperatureC uint16
 
 	// Cumulative counters (need delta computation).
 	tokensTotal float64
@@ -327,6 +433,19 @@ func (s *metricsScraper) parseVLLMMetrics(body, clusterName, poolName, podName, 
 		"vllm:time_to_first_token_seconds_count",
 		"vllm_time_to_first_token_seconds_count",
 	)
+	// Fall back to e2e request latency when TTFT is zero.
+	// TTFT is only populated for streaming requests; for non-streaming,
+	// e2e latency is the best proxy (time from receive to completion).
+	if pm.ttftSum == 0 && pm.ttftCount > 0 {
+		pm.ttftSum = firstFound(body,
+			"vllm:e2e_request_latency_seconds_sum",
+			"vllm_e2e_request_latency_seconds_sum",
+		)
+		pm.ttftCount = firstFound(body,
+			"vllm:e2e_request_latency_seconds_count",
+			"vllm_e2e_request_latency_seconds_count",
+		)
+	}
 
 	return pm
 }
@@ -385,8 +504,8 @@ func firstFound(body string, names ...string) float64 {
 // parsePrometheusValue extracts a numeric value for a metric name from
 // Prometheus text exposition format. Handles both bare metrics and those
 // with labels (e.g., metric_name{label="val"} 123.45).
-// The Prometheus format is: metric_name[{labels}] value [timestamp]
-// so the value is always the second field (index 1), not the last.
+// Label values may contain spaces (e.g., modelName="Tesla T4"), so we
+// skip past the closing '}' before splitting for the numeric value.
 func parsePrometheusValue(body, name string) (float64, bool) {
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
@@ -406,10 +525,26 @@ func parsePrometheusValue(body, name string) (float64, bool) {
 			continue
 		}
 
-		// Value is the second field (after name+labels, before optional timestamp).
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			v, err := strconv.ParseFloat(fields[1], 64)
+		// Extract the value portion after the metric name + optional labels.
+		// If labels exist, skip past the closing '}' to avoid spaces in label
+		// values (e.g., modelName="Tesla T4") from corrupting field splitting.
+		valuePart := line
+		if idx := strings.IndexByte(line, '{'); idx > 0 {
+			closeIdx := strings.LastIndexByte(line, '}')
+			if closeIdx > idx && closeIdx+1 < len(line) {
+				valuePart = strings.TrimSpace(line[closeIdx+1:])
+			}
+		} else {
+			// No labels — value follows the metric name after a space.
+			if idx := strings.IndexByte(line, ' '); idx > 0 {
+				valuePart = strings.TrimSpace(line[idx+1:])
+			}
+		}
+
+		// valuePart is now "value [timestamp]" — take the first field.
+		fields := strings.Fields(valuePart)
+		if len(fields) >= 1 {
+			v, err := strconv.ParseFloat(fields[0], 64)
 			if err == nil {
 				return v, true
 			}

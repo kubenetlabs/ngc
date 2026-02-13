@@ -6,7 +6,7 @@ frontend:
   replicas: 2
   image:
     repository: danny2guns/ngf-console-frontend
-    tag: "0.1.0"
+    tag: "0.1.1"
     pullPolicy: Always
   resources:
     requests:
@@ -17,10 +17,10 @@ frontend:
       memory: 128Mi
 
 api:
-  replicas: 2
+  replicas: 1
   image:
     repository: danny2guns/ngf-console-api
-    tag: "0.1.0"
+    tag: "0.1.2-ws-fix"
     pullPolicy: Always
   resources:
     requests:
@@ -61,7 +61,7 @@ operator:
       memory: 256Mi
 
 database:
-  type: postgresql
+  type: sqlite
   postgresql:
     host: ""
     port: 5432
@@ -142,14 +142,14 @@ ingress:
     secretName: ngf-console-tls
 
 multiCluster:
-  enabled: false
-  hubClusterName: ""
+  enabled: true
+  hubClusterName: kph-demo
   namespace: ngf-system
   # Gateway reference for the HTTPRoute that exposes the hub API to agents.
   # Required when multiCluster.enabled is true.
   gatewayRef:
-    name: ""        # e.g., "llm-gateway" or "main-gateway"
-    namespace: ""   # e.g., "nginx-gateway"
+    name: "llm-gateway"
+    namespace: "nginx-gateway"
   otel:
     externalPort: 4320
     service:

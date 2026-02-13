@@ -135,6 +135,9 @@ func (h *Hub) runGenerator(gen topicGenerator) {
 				slog.Error("ws generator error", "topic", gen.topic, "error", err)
 				continue
 			}
+			if data == nil {
+				continue
+			}
 			h.broadcast(gen.topic, data)
 		case <-h.stopCh:
 			return

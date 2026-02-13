@@ -64,4 +64,9 @@ spec:
             {{- toYaml .Values.api.resources | nindent 12 }}
       volumes:
         - name: data
+          {{- if and (eq .Values.database.type "sqlite") .Values.database.sqlite.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "ngf-console.fullname" . }}-api-data
+          {{- else }}
           emptyDir: {}
+          {{- end }}

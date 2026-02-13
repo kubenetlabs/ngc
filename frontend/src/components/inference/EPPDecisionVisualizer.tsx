@@ -46,7 +46,7 @@ export function EPPDecisionVisualizer({ pool }: EPPDecisionVisualizerProps) {
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.topic === "epp-decisions") {
+          if (msg.topic === "epp-decisions" && msg.data?.requestId) {
             const decision = msg.data as EPPDecision;
             setWsDecisions((prev) => [decision, ...prev].slice(0, 20));
             setHighlightedPod(decision.selectedPod);

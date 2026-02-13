@@ -67,6 +67,13 @@ vllm:num_requests_running 3
 			wantFound: false,
 		},
 		{
+			name:      "labels with spaces (DCGM Tesla T4)",
+			body:      `DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",device="nvidia0",modelName="Tesla T4",Hostname="dcgm-q7dnp",DCGM_FI_DRIVER_VERSION="580.105.08"} 10660` + "\n",
+			metric:    "DCGM_FI_DEV_FB_USED",
+			wantVal:   10660,
+			wantFound: true,
+		},
+		{
 			name:      "histogram sum",
 			body:      "vllm:time_to_first_token_seconds_sum 123.456\n",
 			metric:    "vllm:time_to_first_token_seconds_sum",
@@ -372,5 +379,81 @@ vllm_time_to_first_token_seconds_count 200
 	}
 	if math.Abs(pm.tps-30.0) > 0.01 {
 		t.Errorf("tps = %f, want 30.0", pm.tps)
+	}
+}
+
+func TestParseDCGMMetrics(t *testing.T) {
+	body := `# HELP DCGM_FI_DEV_GPU_UTIL GPU utilization (in %).
+# TYPE DCGM_FI_DEV_GPU_UTIL gauge
+DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-abc",device="nvidia0"} 72
+# HELP DCGM_FI_DEV_FB_USED Framebuffer memory used (in MiB).
+# TYPE DCGM_FI_DEV_FB_USED gauge
+DCGM_FI_DEV_FB_USED{gpu="0",UUID="GPU-abc",device="nvidia0"} 8192
+# HELP DCGM_FI_DEV_FB_FREE Framebuffer memory free (in MiB).
+# TYPE DCGM_FI_DEV_FB_FREE gauge
+DCGM_FI_DEV_FB_FREE{gpu="0",UUID="GPU-abc",device="nvidia0"} 7808
+# HELP DCGM_FI_DEV_GPU_TEMP GPU temperature (in C).
+# TYPE DCGM_FI_DEV_GPU_TEMP gauge
+DCGM_FI_DEV_GPU_TEMP{gpu="0",UUID="GPU-abc",device="nvidia0"} 65
+`
+
+	gpuUtil := firstFound(body, "DCGM_FI_DEV_GPU_UTIL")
+	if math.Abs(gpuUtil-72.0) > 0.01 {
+		t.Errorf("gpuUtil = %f, want 72.0", gpuUtil)
+	}
+
+	fbUsed := uint32(firstFound(body, "DCGM_FI_DEV_FB_USED"))
+	if fbUsed != 8192 {
+		t.Errorf("fbUsed = %d, want 8192", fbUsed)
+	}
+
+	fbFree := uint32(firstFound(body, "DCGM_FI_DEV_FB_FREE"))
+	if fbFree != 7808 {
+		t.Errorf("fbFree = %d, want 7808", fbFree)
+	}
+
+	total := fbUsed + fbFree
+	if total != 16000 {
+		t.Errorf("total VRAM = %d, want 16000", total)
+	}
+
+	temp := uint16(firstFound(body, "DCGM_FI_DEV_GPU_TEMP"))
+	if temp != 65 {
+		t.Errorf("temperature = %d, want 65", temp)
+	}
+}
+
+func TestParseDCGMMetrics_NotPresent(t *testing.T) {
+	// When DCGM metrics aren't in the body, all values should be 0.
+	body := `vllm:num_requests_running 5
+vllm:gpu_cache_usage_perc 0.42
+`
+
+	gpuUtil := firstFound(body, "DCGM_FI_DEV_GPU_UTIL")
+	if gpuUtil != 0 {
+		t.Errorf("gpuUtil = %f, want 0 when DCGM absent", gpuUtil)
+	}
+
+	fbUsed := firstFound(body, "DCGM_FI_DEV_FB_USED")
+	if fbUsed != 0 {
+		t.Errorf("fbUsed = %f, want 0 when DCGM absent", fbUsed)
+	}
+}
+
+func TestParsedPodMetrics_DCGMFields(t *testing.T) {
+	pm := parsedPodMetrics{
+		gpuMemUsedMB:    8192,
+		gpuMemTotalMB:   16000,
+		gpuTemperatureC: 65,
+	}
+
+	if pm.gpuMemUsedMB != 8192 {
+		t.Errorf("gpuMemUsedMB = %d, want 8192", pm.gpuMemUsedMB)
+	}
+	if pm.gpuMemTotalMB != 16000 {
+		t.Errorf("gpuMemTotalMB = %d, want 16000", pm.gpuMemTotalMB)
+	}
+	if pm.gpuTemperatureC != 65 {
+		t.Errorf("gpuTemperatureC = %d, want 65", pm.gpuTemperatureC)
 	}
 }

@@ -1,0 +1,16 @@
+{{- if and (eq .Values.database.type "sqlite") .Values.database.sqlite.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "ngf-console.fullname" . }}-api-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ngf-console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.database.sqlite.persistence.size }}
+{{- end }}

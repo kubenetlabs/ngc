@@ -15,6 +15,15 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    location /api/v1/ws/ {
+        proxy_pass http://api:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
     location /api/ {
         proxy_pass http://api:8080;
         proxy_set_header Host $host;
