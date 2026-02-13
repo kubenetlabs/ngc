@@ -125,6 +125,11 @@ func main() {
 		go inference.RunSyncLoop(context.Background(), pool, metricsProvider, 30*time.Second)
 	}
 
+	// Start metrics scraper (scrapes vLLM /metrics → ClickHouse).
+	if pool != nil && chClient != nil {
+		go inference.RunMetricsScraper(context.Background(), pool, chClient.Conn(), metricsProvider, 15*time.Second)
+	}
+
 	// Initialize Prometheus client if configured.
 	var promClient *prom.Client
 	if *prometheusURL != "" {

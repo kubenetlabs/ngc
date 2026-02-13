@@ -62,7 +62,7 @@ func New(cfg Config) *Server {
 	r.Use(MaxBodySize(1 << 20)) // 1MB max body size
 
 	hub := NewHub()
-	RegisterInferenceTopics(hub)
+	RegisterInferenceTopics(hub, cfg.MetricsProvider)
 	hub.Start()
 
 	// Create and start the alert evaluator.

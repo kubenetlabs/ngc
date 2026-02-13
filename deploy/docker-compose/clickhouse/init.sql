@@ -111,28 +111,55 @@ AS SELECT
 FROM ngf_access_logs
 GROUP BY window_start, cluster_name, gateway, route, status_class;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS ngf_inference_metrics_1m
-ENGINE = AggregatingMergeTree()
-PARTITION BY toYYYYMMDD(window_start)
-ORDER BY (cluster_name, inference_pool, model_name, window_start)
-TTL window_start + INTERVAL 90 DAY
-AS SELECT
-    toStartOfMinute(timestamp) AS window_start,
-    cluster_name,
-    inference_pool,
-    model_name,
-    countState() AS request_count,
-    avgState(time_to_first_token_ms) AS avg_ttft,
-    quantileState(0.50)(time_to_first_token_ms) AS p50_ttft,
-    quantileState(0.95)(time_to_first_token_ms) AS p95_ttft,
-    quantileState(0.99)(time_to_first_token_ms) AS p99_ttft,
-    avgState(tokens_per_second) AS avg_tps,
-    sumState(tokens_generated) AS total_tokens,
-    avgState(queue_depth_at_selection) AS avg_queue_depth,
-    avgState(kv_cache_pct_at_selection) AS avg_kv_cache_pct,
-    avgState(gpu_utilization_pct) AS avg_gpu_util,
-    avgState(gpu_memory_used_mb) AS avg_gpu_mem_used,
-    maxState(gpu_memory_used_mb) AS max_gpu_mem_used,
-    avgState(epp_decision_latency_us) AS avg_epp_latency
-FROM ngf_inference_logs
-GROUP BY window_start, cluster_name, inference_pool, model_name;
+CREATE TABLE IF NOT EXISTS ngf_inference_metrics_1m (
+    timestamp DateTime64(3),
+    cluster_name LowCardinality(String) DEFAULT '',
+    pool_name String,
+    ttft_ms Float64,
+    tps Float64,
+    total_tokens UInt64,
+    queue_depth UInt32,
+    kv_cache_pct Float64,
+    prefix_cache_hit UInt8,
+    gpu_util_pct Float64
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(timestamp)
+ORDER BY (cluster_name, pool_name, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 90 DAY;
+
+CREATE TABLE IF NOT EXISTS ngf_epp_decisions (
+    timestamp DateTime64(3),
+    cluster_name LowCardinality(String) DEFAULT '',
+    pool_name String,
+    request_id String,
+    selected_pod String,
+    reason LowCardinality(String),
+    queue_depth UInt16,
+    kv_cache_pct Float64,
+    prefix_cache_hit UInt8,
+    candidates_considered UInt8,
+    decision_latency_us UInt32
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMMDD(timestamp)
+ORDER BY (cluster_name, pool_name, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 14 DAY;
+
+CREATE TABLE IF NOT EXISTS ngf_pod_metrics (
+    timestamp DateTime64(3),
+    cluster_name LowCardinality(String) DEFAULT '',
+    pool_name String,
+    pod_name String,
+    node_name String,
+    gpu_id UInt8,
+    gpu_type LowCardinality(String),
+    queue_depth UInt16,
+    kv_cache_util_pct Float64,
+    prefix_cache_state UInt8,
+    gpu_util_pct Float64,
+    gpu_mem_used_mb UInt32,
+    gpu_mem_total_mb UInt32,
+    gpu_temperature_c UInt16,
+    requests_in_flight UInt16
+) ENGINE = ReplacingMergeTree()
+ORDER BY (cluster_name, pool_name, pod_name)
+TTL toDateTime(timestamp) + INTERVAL 1 DAY;

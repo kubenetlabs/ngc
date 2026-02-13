@@ -48,8 +48,8 @@ SELECT
     kv_cache_util_pct, prefix_cache_state, gpu_util_pct,
     gpu_mem_used_mb, gpu_mem_total_mb, gpu_temperature_c,
     requests_in_flight
-FROM ngf_pod_metrics
-WHERE pool_name = ?
+FROM ngf_pod_metrics FINAL
+WHERE (? = '' OR pool_name = ?)
   AND (? = '' OR cluster_name = ?)
 ORDER BY pod_name
 `
@@ -60,7 +60,7 @@ SELECT
     kv_cache_pct, prefix_cache_hit, candidates_considered,
     decision_latency_us
 FROM ngf_epp_decisions
-WHERE pool_name = ?
+WHERE (? = '' OR pool_name = ?)
   AND (? = '' OR cluster_name = ?)
 ORDER BY timestamp DESC
 LIMIT ?

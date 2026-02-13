@@ -142,7 +142,7 @@ func (p *Provider) GetMetricsSummary(ctx context.Context, pool string) (*inferen
 
 func (p *Provider) GetPodMetrics(ctx context.Context, pool string) ([]inference.PodMetrics, error) {
 	cn := clusterFilter(ctx)
-	rows, err := p.client.Conn().Query(ctx, queryPodMetrics, pool, cn, cn)
+	rows, err := p.client.Conn().Query(ctx, queryPodMetrics, pool, pool, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("GetPodMetrics query: %w", err)
 	}
@@ -169,7 +169,7 @@ func (p *Provider) GetPodMetrics(ctx context.Context, pool string) ([]inference.
 
 func (p *Provider) GetRecentEPPDecisions(ctx context.Context, pool string, limit int) ([]inference.EPPDecision, error) {
 	cn := clusterFilter(ctx)
-	rows, err := p.client.Conn().Query(ctx, queryRecentEPPDecisions, pool, cn, cn, limit)
+	rows, err := p.client.Conn().Query(ctx, queryRecentEPPDecisions, pool, pool, cn, cn, limit)
 	if err != nil {
 		return nil, fmt.Errorf("GetRecentEPPDecisions query: %w", err)
 	}

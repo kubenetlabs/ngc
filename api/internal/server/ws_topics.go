@@ -1,76 +1,94 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"math"
+	"log/slog"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/kubenetlabs/ngc/api/internal/inference"
 )
 
-// safeRand wraps rand.Rand with a mutex for concurrent use.
-type safeRand struct {
-	mu  sync.Mutex
-	rng *rand.Rand
+// RegisterInferenceTopics adds generators for inference WebSocket topics.
+// When a non-nil MetricsProvider is given, epp-decisions and gpu-metrics
+// are backed by real ClickHouse queries. scaling-events remains synthetic.
+func RegisterInferenceTopics(hub *Hub, provider inference.MetricsProvider) {
+	registerEPPDecisions(hub, provider)
+	registerGPUMetrics(hub, provider)
+	registerScalingEvents(hub)
 }
 
-func (sr *safeRand) Intn(n int) int {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	return sr.rng.Intn(n)
-}
+// registerEPPDecisions streams the most recent EPP decision every 1s.
+func registerEPPDecisions(hub *Hub, provider inference.MetricsProvider) {
+	var (
+		mu            sync.Mutex
+		lastTimestamp time.Time
+	)
 
-func (sr *safeRand) Float64() float64 {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	return sr.rng.Float64()
-}
-
-// RegisterInferenceTopics adds mock generators for inference WebSocket topics.
-func RegisterInferenceTopics(hub *Hub) {
-	rng := &safeRand{rng: rand.New(rand.NewSource(time.Now().UnixNano()))}
-
-	// EPP Decisions: emitted every 1s
 	hub.AddGenerator("epp-decisions", 1*time.Second, func() (json.RawMessage, error) {
-		strategies := []string{"least_queue", "kv_cache", "prefix_affinity", "composite"}
-		pools := []string{"llama3-70b-prod", "mixtral-8x7b-staging", "codellama-34b-prod"}
-		pool := pools[rng.Intn(len(pools))]
-		decision := map[string]any{
-			"timestamp":            time.Now().UTC().Format(time.RFC3339),
-			"requestId":            fmt.Sprintf("req-%04d", rng.Intn(10000)),
-			"selectedPod":          fmt.Sprintf("%s-pod-%d", pool, rng.Intn(6)),
-			"pool":                 pool,
-			"reason":               strategies[rng.Intn(len(strategies))],
-			"queueDepth":           rng.Intn(12),
-			"kvCachePct":           math.Round((40+rng.Float64()*40)*100) / 100,
-			"prefixCacheHit":       rng.Float64() > 0.6,
-			"candidatesConsidered": 3 + rng.Intn(4),
-			"decisionLatencyUs":    80 + rng.Intn(200),
-		}
-		return json.Marshal(decision)
-	})
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 
-	// GPU Metrics: emitted every 2s
-	hub.AddGenerator("gpu-metrics", 2*time.Second, func() (json.RawMessage, error) {
-		pods := make([]map[string]any, 6)
-		for i := range pods {
-			pods[i] = map[string]any{
-				"podName":          fmt.Sprintf("llama3-70b-prod-pod-%d", i),
-				"gpuUtilPct":       math.Round((40+rng.Float64()*55)*100) / 100,
-				"gpuMemUsedMb":     40000 + rng.Intn(30000),
-				"gpuMemTotalMb":    81920,
-				"kvCacheUtilPct":   math.Round((30+rng.Float64()*50)*100) / 100,
-				"queueDepth":       rng.Intn(15),
-				"requestsInFlight": rng.Intn(8),
-				"gpuTemperatureC":  55 + rng.Intn(20),
-			}
+		decisions, err := provider.GetRecentEPPDecisions(ctx, "", 1)
+		if err != nil {
+			slog.Debug("ws epp-decisions: query failed", "error", err)
+			return json.Marshal([]interface{}{})
 		}
+
+		if len(decisions) == 0 {
+			return json.Marshal([]interface{}{})
+		}
+
+		mu.Lock()
+		seen := decisions[0].Timestamp.Equal(lastTimestamp)
+		if !seen {
+			lastTimestamp = decisions[0].Timestamp
+		}
+		mu.Unlock()
+
+		if seen {
+			// No new decision since last broadcast; send empty array.
+			return json.Marshal([]interface{}{})
+		}
+
+		return json.Marshal(decisions[0])
+	})
+}
+
+// registerGPUMetrics streams per-pod GPU metrics every 2s.
+func registerGPUMetrics(hub *Hub, provider inference.MetricsProvider) {
+	hub.AddGenerator("gpu-metrics", 2*time.Second, func() (json.RawMessage, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		pods, err := provider.GetPodMetrics(ctx, "")
+		if err != nil {
+			slog.Debug("ws gpu-metrics: query failed", "error", err)
+			return json.Marshal([]interface{}{})
+		}
+
+		if len(pods) == 0 {
+			return json.Marshal([]interface{}{})
+		}
+
 		return json.Marshal(pods)
 	})
+}
 
-	// Scaling Events: emitted every 15s
+// registerScalingEvents emits synthetic scaling events every 15s.
+// No backing ClickHouse table exists yet; this will be wired to real
+// KEDA/HPA events when that data pipeline is built.
+func registerScalingEvents(hub *Hub) {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	var mu sync.Mutex
+
 	hub.AddGenerator("scaling-events", 15*time.Second, func() (json.RawMessage, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
 		events := []string{"scale-up", "scale-down", "cooldown"}
 		event := map[string]any{
 			"timestamp":    time.Now().UTC().Format(time.RFC3339),
@@ -78,7 +96,7 @@ func RegisterInferenceTopics(hub *Hub) {
 			"event":        events[rng.Intn(len(events))],
 			"fromReplicas": 4 + rng.Intn(4),
 			"toReplicas":   4 + rng.Intn(4),
-			"trigger":      "gpu_utilization > 85%",
+			"trigger":      fmt.Sprintf("gpu_utilization > %d%%", 70+rng.Intn(20)),
 		}
 		return json.Marshal(event)
 	})
