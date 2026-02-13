@@ -141,6 +141,24 @@ func (h *InferenceHandler) CreatePool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("creating inferencestack: %v", err))
 		return
 	}
+
+	// Insert pool metadata into ClickHouse so it appears in the pool list.
+	_ = h.Provider.UpsertPool(r.Context(), inference.PoolStatus{
+		Name:           req.Name,
+		Namespace:      req.Namespace,
+		ModelName:      req.ModelName,
+		ModelVersion:   req.ModelVersion,
+		ServingBackend: req.ServingBackend,
+		GPUType:        req.GPUType,
+		GPUCount:       uint32(req.GPUCount),
+		Replicas:       uint32(req.Replicas),
+		ReadyReplicas:  0,
+		MinReplicas:    uint32(req.MinReplicas),
+		MaxReplicas:    uint32(req.MaxReplicas),
+		Status:         "Pending",
+		CreatedAt:      time.Now(),
+	})
+
 	writeJSON(w, http.StatusCreated, toInferenceStackResponse(created))
 }
 
@@ -266,6 +284,10 @@ func (h *InferenceHandler) DeletePool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deleting inferencestack %s/%s: %v", ns, name, err))
 		return
 	}
+
+	// Remove pool metadata from ClickHouse.
+	_ = h.Provider.DeletePool(r.Context(), name, ns)
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "inference pool deleted", "name": name, "namespace": ns})
 }
 

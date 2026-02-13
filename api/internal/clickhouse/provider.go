@@ -90,6 +90,29 @@ func (p *Provider) GetPool(ctx context.Context, name string) (*inference.PoolSta
 	return &ps, nil
 }
 
+func (p *Provider) UpsertPool(ctx context.Context, pool inference.PoolStatus) error {
+	cn := clusterFilter(ctx)
+	// ClickHouse ReplacingMergeTree will handle deduplication on (name, namespace).
+	err := p.client.Conn().Exec(ctx, queryUpsertPool,
+		pool.Name, pool.Namespace, pool.ModelName, pool.ModelVersion,
+		pool.ServingBackend, pool.GPUType, pool.GPUCount,
+		pool.Replicas, pool.ReadyReplicas, pool.MinReplicas, pool.MaxReplicas,
+		pool.Status, cn, pool.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("UpsertPool: %w", err)
+	}
+	return nil
+}
+
+func (p *Provider) DeletePool(ctx context.Context, name, namespace string) error {
+	err := p.client.Conn().Exec(ctx, queryDeletePool, name, namespace)
+	if err != nil {
+		return fmt.Errorf("DeletePool: %w", err)
+	}
+	return nil
+}
+
 func (p *Provider) GetMetricsSummary(ctx context.Context, pool string) (*inference.MetricsSummary, error) {
 	cn := clusterFilter(ctx)
 	rows, err := p.client.Conn().Query(ctx, queryMetricsSummary, pool, pool, cn, cn)

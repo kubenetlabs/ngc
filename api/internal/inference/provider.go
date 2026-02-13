@@ -8,6 +8,8 @@ import "context"
 type MetricsProvider interface {
 	ListPools(ctx context.Context) ([]PoolStatus, error)
 	GetPool(ctx context.Context, name string) (*PoolStatus, error)
+	UpsertPool(ctx context.Context, pool PoolStatus) error
+	DeletePool(ctx context.Context, name, namespace string) error
 	GetMetricsSummary(ctx context.Context, pool string) (*MetricsSummary, error)
 	GetPodMetrics(ctx context.Context, pool string) ([]PodMetrics, error)
 	GetRecentEPPDecisions(ctx context.Context, pool string, limit int) ([]EPPDecision, error)

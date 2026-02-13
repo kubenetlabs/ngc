@@ -106,6 +106,27 @@ func (m *MockProvider) GetPool(_ context.Context, name string) (*PoolStatus, err
 	return nil, fmt.Errorf("pool %q not found", name)
 }
 
+func (m *MockProvider) UpsertPool(_ context.Context, pool PoolStatus) error {
+	for i, p := range mockPools {
+		if p.Name == pool.Name && p.Namespace == pool.Namespace {
+			mockPools[i] = pool
+			return nil
+		}
+	}
+	mockPools = append(mockPools, pool)
+	return nil
+}
+
+func (m *MockProvider) DeletePool(_ context.Context, name, namespace string) error {
+	for i, p := range mockPools {
+		if p.Name == name && p.Namespace == namespace {
+			mockPools = append(mockPools[:i], mockPools[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
 func (m *MockProvider) GetMetricsSummary(_ context.Context, _ string) (*MetricsSummary, error) {
 	return &MetricsSummary{
 		AvgTTFT:            m.varyFloat(120, 40),

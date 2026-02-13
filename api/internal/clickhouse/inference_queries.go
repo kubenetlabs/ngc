@@ -115,6 +115,18 @@ GROUP BY ts
 ORDER BY ts
 `
 
+const queryUpsertPool = `
+INSERT INTO ngf_inference_pools (
+    name, namespace, model_name, model_version, serving_backend,
+    gpu_type, gpu_count, replicas, ready_replicas, min_replicas, max_replicas,
+    status, cluster_name, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+const queryDeletePool = `
+ALTER TABLE ngf_inference_pools DELETE WHERE name = ? AND namespace = ?
+`
+
 const queryKVCacheSeries = `
 SELECT
     toStartOfMinute(timestamp) AS ts,
