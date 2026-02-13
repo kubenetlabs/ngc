@@ -30,12 +30,20 @@ export default function InferencePoolList() {
           <h1 className="text-2xl font-bold">Inference Pools</h1>
           <p className="mt-1 text-muted-foreground">GPU-aware inference pool management.</p>
         </div>
-        <Link
-          to="/inference"
-          className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted/30"
-        >
-          Overview
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/inference"
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted/30"
+          >
+            Overview
+          </Link>
+          <Link
+            to="create"
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
+          >
+            Create Pool
+          </Link>
+        </div>
       </div>
 
       {isLoading && <p className="mt-6 text-muted-foreground">Loading pools...</p>}
