@@ -16,8 +16,8 @@ rules:
   - apiGroups: ["gateway.nginx.org"]
     resources: ["ratelimitpolicies", "clientsettingspolicies", "observabilitypolicies"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Gateway Inference Extension
-  - apiGroups: ["inference.networking.x-k8s.io"]
+  # Gateway Inference Extension (GA and experimental)
+  - apiGroups: ["inference.networking.k8s.io", "inference.networking.x-k8s.io"]
     resources: ["inferencepools"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # NGF Console CRDs

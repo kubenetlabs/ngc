@@ -23,8 +23,8 @@ rules:
   - apiGroups: ["ngf-console.f5.com"]
     resources: ["distributedcloudpublishes/finalizers"]
     verbs: ["update"]
-  # InferencePool (Gateway Inference Extension)
-  - apiGroups: ["inference.networking.x-k8s.io"]
+  # InferencePool (Gateway Inference Extension — GA and experimental)
+  - apiGroups: ["inference.networking.k8s.io", "inference.networking.x-k8s.io"]
     resources: ["inferencepools"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Gateway API resources

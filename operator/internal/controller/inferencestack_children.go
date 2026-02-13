@@ -60,6 +60,20 @@ func (r *InferenceStackReconciler) reconcileInferencePool(ctx context.Context, s
 	return v1alpha1.ChildStatus{Kind: "InferencePool", Name: name, Ready: true, Message: "in sync"}
 }
 
+// servingPort returns the default target port for a given serving backend.
+func servingPort(backend string) int64 {
+	switch backend {
+	case "triton":
+		return 8001
+	case "tgi":
+		return 80
+	case "ollama":
+		return 11434
+	default: // vllm
+		return 8000
+	}
+}
+
 // buildDesiredInferencePool constructs the desired InferencePool unstructured object.
 func buildDesiredInferencePool(stack *v1alpha1.InferenceStack, name string) *unstructured.Unstructured {
 	pool := &unstructured.Unstructured{}
@@ -67,41 +81,45 @@ func buildDesiredInferencePool(stack *v1alpha1.InferenceStack, name string) *uns
 	pool.SetName(name)
 	pool.SetNamespace(stack.Namespace)
 
-	// Set owner reference
-	isController := true
-	blockDeletion := true
-	pool.SetOwnerReferences([]metav1.OwnerReference{
-		{
-			APIVersion:         v1alpha1.SchemeGroupVersion.String(),
-			Kind:               "InferenceStack",
-			Name:               stack.Name,
-			UID:                stack.UID,
-			Controller:         &isController,
-			BlockOwnerDeletion: &blockDeletion,
-		},
-	})
+	setOwnerRef(pool, stack)
 
-	// Build spec
+	// Build selector.matchLabels
 	selector := stack.Spec.Pool.Selector
 	if selector == nil {
 		selector = map[string]string{
 			"app": stack.Name,
 		}
 	}
-
-	selectorInterface := make(map[string]interface{}, len(selector))
+	matchLabels := make(map[string]interface{}, len(selector))
 	for k, v := range selector {
-		selectorInterface[k] = v
+		matchLabels[k] = v
 	}
 
+	// EPP service name follows the convention: <stack>-epp
+	eppServiceName := stack.Name + "-epp"
+
 	spec := map[string]interface{}{
-		"targetModel": stack.Spec.ModelName,
-		"selector":    selectorInterface,
+		"targetPorts": []interface{}{
+			map[string]interface{}{
+				"number": servingPort(stack.Spec.ServingBackend),
+			},
+		},
+		"selector": map[string]interface{}{
+			"matchLabels": matchLabels,
+		},
+		"endpointPickerRef": map[string]interface{}{
+			"group":       "",
+			"kind":        "Service",
+			"name":        eppServiceName,
+			"failureMode": "FailClose",
+			"port": map[string]interface{}{
+				"number": int64(9002),
+			},
+		},
 	}
 
 	pool.Object["spec"] = spec
 
-	// Set labels
 	pool.SetLabels(map[string]string{
 		"app.kubernetes.io/managed-by": "ngf-console",
 		"ngf-console.f5.com/stack":     stack.Name,
@@ -533,8 +551,8 @@ func boolPtr(b bool) *bool { return &b }
 
 func inferencePoolGVK() schema.GroupVersionKind {
 	return schema.GroupVersionKind{
-		Group:   "inference.networking.x-k8s.io",
-		Version: "v1alpha2",
+		Group:   "inference.networking.k8s.io",
+		Version: "v1",
 		Kind:    "InferencePool",
 	}
 }
