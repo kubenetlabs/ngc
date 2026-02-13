@@ -13,6 +13,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o operator ./cmd/
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/operator .
-USER 65532:65532
+USER 65534:65534
 
 ENTRYPOINT ["/operator"]

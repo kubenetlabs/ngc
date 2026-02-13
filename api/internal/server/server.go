@@ -3,8 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -70,10 +75,40 @@ func New(cfg Config) *Server {
 	return s
 }
 
-// Run starts the HTTP server on the given address.
+// Run starts the HTTP server on the given address with graceful shutdown.
 func (s *Server) Run(addr string) error {
-	slog.Info("listening", "addr", addr)
-	return http.ListenAndServe(addr, s.Router)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: s.Router,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		slog.Info("listening", "addr", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-errCh:
+		return err
+	case sig := <-quit:
+		slog.Info("shutting down server", "signal", sig.String())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		return fmt.Errorf("server shutdown: %w", err)
+	}
+	slog.Info("server stopped gracefully")
+	return nil
 }
 
 // registerRoutes mounts all API v1 route groups.

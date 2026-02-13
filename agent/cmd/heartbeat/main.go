@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -207,11 +209,14 @@ func gatherPayload(ctx context.Context, dc dynamic.Interface, disco *discovery.D
 			capacity, _, _ := unstructured.NestedMap(node.Object, "status", "capacity")
 			if gpuStr, ok := capacity["nvidia.com/gpu"]; ok {
 				if gpuVal, ok := gpuStr.(string); ok && gpuVal != "0" {
-					gpu.TotalGPUs++
-					// Try to determine GPU type from labels.
+					count, err := strconv.ParseInt(gpuVal, 10, 32)
+					if err != nil || count <= 0 {
+						continue
+					}
+					gpu.TotalGPUs += int32(count)
 					labels := node.GetLabels()
 					if gpuType, ok := labels["nvidia.com/gpu.product"]; ok {
-						gpu.GPUTypes[gpuType]++
+						gpu.GPUTypes[gpuType] += int32(count)
 					}
 				}
 			}
@@ -237,19 +242,3 @@ func buildConfig(kubeconfigPath string) (*rest.Config, error) {
 	return cfg, nil
 }
 
-// unstructured helper (re-export from apimachinery)
-var unstructured = unstructuredHelper{}
-
-type unstructuredHelper struct{}
-
-func (unstructuredHelper) NestedMap(obj map[string]interface{}, fields ...string) (map[string]interface{}, bool, error) {
-	val := obj
-	for _, f := range fields {
-		next, ok := val[f].(map[string]interface{})
-		if !ok {
-			return nil, false, nil
-		}
-		val = next
-	}
-	return val, true, nil
-}

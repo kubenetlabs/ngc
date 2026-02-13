@@ -165,10 +165,27 @@ func (h *Hub) ServeWS(topic string) func(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Hub) writePump(client *wsClient) {
-	defer client.conn.Close()
-	for msg := range client.send {
-		if err := client.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			return
+	ticker := time.NewTicker(wsPingInterval)
+	defer func() {
+		ticker.Stop()
+		client.conn.Close()
+	}()
+	for {
+		select {
+		case msg, ok := <-client.send:
+			client.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+			if !ok {
+				client.conn.WriteMessage(websocket.CloseMessage, nil)
+				return
+			}
+			if err := client.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			client.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -177,6 +194,11 @@ func (h *Hub) readPump(client *wsClient) {
 	defer func() {
 		h.unregister <- client
 	}()
+	client.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+	client.conn.SetPongHandler(func(string) error {
+		client.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+		return nil
+	})
 	for {
 		_, _, err := client.conn.ReadMessage()
 		if err != nil {

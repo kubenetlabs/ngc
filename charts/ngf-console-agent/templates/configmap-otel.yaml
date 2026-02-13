@@ -35,7 +35,10 @@ data:
       otlp/hub:
         endpoint: {{ .Values.hub.otelEndpoint | quote }}
         tls:
-          insecure: true
+          insecure: {{ .Values.otelCollector.tls.insecure | default false }}
+          {{- if .Values.otelCollector.tls.caFile }}
+          ca_file: {{ .Values.otelCollector.tls.caFile }}
+          {{- end }}
 
     service:
       extensions: [health_check]

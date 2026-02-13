@@ -28,6 +28,7 @@ func CORSMiddleware(next http.Handler) http.Handler {
 	allowedOrigins := os.Getenv("CORS_ALLOWED_ORIGINS")
 	if allowedOrigins == "" {
 		allowedOrigins = "*"
+		slog.Warn("CORS_ALLOWED_ORIGINS not set, allowing all origins — set this in production")
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -120,40 +120,53 @@ func (r *InferenceStackReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{RequeueAfter: reconcileInterval}, nil
 }
 
+// crdExists checks whether the given GVK is known to the API server.
+func crdExists(mgr ctrl.Manager, gvk schema.GroupVersionKind) bool {
+	_, err := mgr.GetRESTMapper().RESTMapping(gvk.GroupKind(), gvk.Version)
+	return err == nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *InferenceStackReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Watch InferencePool (unstructured since types may not be published)
-	inferencePoolObj := &unstructured.Unstructured{}
-	inferencePoolObj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "inference.networking.x-k8s.io",
-		Version: "v1alpha2",
-		Kind:    "InferencePool",
-	})
-
-	// Watch KEDA ScaledObject (unstructured since KEDA types are external)
-	scaledObject := &unstructured.Unstructured{}
-	scaledObject.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "keda.sh",
-		Version: "v1alpha1",
-		Kind:    "ScaledObject",
-	})
-
-	// Watch HTTPRoute (unstructured to avoid typed dependency in operator module)
-	httpRoute := &unstructured.Unstructured{}
-	httpRoute.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "gateway.networking.k8s.io",
-		Version: "v1",
-		Kind:    "HTTPRoute",
-	})
-
 	ownerHandler := handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.InferenceStack{})
 
-	return ctrl.NewControllerManagedBy(mgr).
+	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.InferenceStack{}).
 		Owns(&corev1.ConfigMap{}).
-		Owns(&appsv1.DaemonSet{}).
-		Watches(inferencePoolObj, ownerHandler).
-		Watches(scaledObject, ownerHandler).
-		Watches(httpRoute, ownerHandler).
-		Complete(r)
+		Owns(&appsv1.DaemonSet{})
+
+	// Conditionally watch InferencePool if the CRD is installed.
+	inferencePoolGVK := schema.GroupVersionKind{Group: "inference.networking.x-k8s.io", Version: "v1alpha2", Kind: "InferencePool"}
+	if crdExists(mgr, inferencePoolGVK) {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(inferencePoolGVK)
+		builder = builder.Watches(obj, ownerHandler)
+		slog.Info("watching InferencePool CRD")
+	} else {
+		slog.Warn("InferencePool CRD not found, skipping watch")
+	}
+
+	// Conditionally watch KEDA ScaledObject if the CRD is installed.
+	scaledObjectGVK := schema.GroupVersionKind{Group: "keda.sh", Version: "v1alpha1", Kind: "ScaledObject"}
+	if crdExists(mgr, scaledObjectGVK) {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(scaledObjectGVK)
+		builder = builder.Watches(obj, ownerHandler)
+		slog.Info("watching KEDA ScaledObject CRD")
+	} else {
+		slog.Warn("KEDA ScaledObject CRD not found, skipping watch")
+	}
+
+	// Conditionally watch HTTPRoute if the CRD is installed.
+	httpRouteGVK := schema.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "HTTPRoute"}
+	if crdExists(mgr, httpRouteGVK) {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(httpRouteGVK)
+		builder = builder.Watches(obj, ownerHandler)
+		slog.Info("watching HTTPRoute CRD")
+	} else {
+		slog.Warn("HTTPRoute CRD not found, skipping watch")
+	}
+
+	return builder.Complete(r)
 }

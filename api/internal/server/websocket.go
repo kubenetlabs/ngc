@@ -3,8 +3,15 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+const (
+	wsWriteTimeout = 10 * time.Second
+	wsPongTimeout  = 60 * time.Second
+	wsPingInterval = 30 * time.Second
 )
 
 var upgrader = websocket.Upgrader{
@@ -28,19 +35,44 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("websocket connected", "remote_addr", r.RemoteAddr)
 
-	// Stub: read messages and echo back until the connection closes.
-	for {
-		msgType, msg, err := conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				slog.Error("websocket read error", "error", err)
-			}
-			break
-		}
+	conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+		return nil
+	})
 
-		if err := conn.WriteMessage(msgType, msg); err != nil {
-			slog.Error("websocket write error", "error", err)
-			break
+	// Ping ticker to detect stale connections.
+	ticker := time.NewTicker(wsPingInterval)
+	defer ticker.Stop()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			msgType, msg, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+					slog.Error("websocket read error", "error", err)
+				}
+				return
+			}
+			conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+			if err := conn.WriteMessage(msgType, msg); err != nil {
+				slog.Error("websocket write error", "error", err)
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-ticker.C:
+			conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		case <-done:
+			return
 		}
 	}
 }

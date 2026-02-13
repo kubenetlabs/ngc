@@ -9,7 +9,7 @@ hub:
 operator:
   enabled: true
   replicas: 1
-  leaderElection: true
+  leaderElection: false
   reconcileInterval: 60s
   image:
     repository: danny2guns/ngf-console-operator
@@ -21,7 +21,7 @@ operator:
       memory: 128Mi
     limits:
       cpu: 500m
-      memory: 256Mi
+      memory: 512Mi
 
 heartbeat:
   enabled: true
@@ -44,6 +44,9 @@ otelCollector:
     repository: otel/opentelemetry-collector-contrib
     tag: "0.96.0"
     pullPolicy: IfNotPresent
+  tls:
+    insecure: true    # Set to false in production; requires valid TLS on hub OTel endpoint
+    caFile: ""        # Path to CA cert for hub OTel endpoint (if using self-signed certs)
   resources:
     requests:
       cpu: 50m

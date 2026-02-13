@@ -3,6 +3,7 @@ package prometheus
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	promapi "github.com/prometheus/client_golang/api"
@@ -18,7 +19,10 @@ type Client struct {
 
 // New creates a new Prometheus client pointing at the given URL.
 func New(url string) (*Client, error) {
-	client, err := promapi.NewClient(promapi.Config{Address: url})
+	client, err := promapi.NewClient(promapi.Config{
+		Address: url,
+		Client:  &http.Client{Timeout: 15 * time.Second},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create prometheus client: %w", err)
 	}

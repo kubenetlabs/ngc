@@ -48,18 +48,26 @@ spec:
             capabilities:
               drop:
                 - ALL
+          ports:
+            - name: health
+              containerPort: 8081
+              protocol: TCP
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8081
-            initialDelaySeconds: 10
-            periodSeconds: 30
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 8081
+              port: health
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.heartbeat.resources | nindent 12 }}
 {{- end }}

@@ -32,9 +32,18 @@ spec:
           image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
           imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
           args:
+            - --health-probe-bind-address=:8082
+            - --metrics-bind-address=:8081
             {{- if .Values.operator.leaderElection }}
             - --leader-elect
             {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8081
+              protocol: TCP
+            - name: health
+              containerPort: 8082
+              protocol: TCP
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -44,15 +53,19 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8082
+              port: health
             initialDelaySeconds: 15
-            periodSeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 8082
+              port: health
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.operator.resources | nindent 12 }}
 {{- end }}
