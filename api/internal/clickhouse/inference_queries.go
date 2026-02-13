@@ -9,7 +9,7 @@ SELECT
     name, namespace, model_name, model_version, serving_backend,
     gpu_type, gpu_count, replicas, ready_replicas, min_replicas, max_replicas,
     status, created_at
-FROM ngf_inference_pools
+FROM ngf_inference_pools FINAL
 WHERE (? = '' OR cluster_name = ?)
 ORDER BY name
 `
@@ -19,7 +19,7 @@ SELECT
     name, namespace, model_name, model_version, serving_backend,
     gpu_type, gpu_count, replicas, ready_replicas, min_replicas, max_replicas,
     status, created_at
-FROM ngf_inference_pools
+FROM ngf_inference_pools FINAL
 WHERE name = ?
   AND (? = '' OR cluster_name = ?)
 LIMIT 1

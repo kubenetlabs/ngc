@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS ngf_inference_pools (
     max_replicas UInt32,
     status String,
     created_at DateTime
-) ENGINE = MergeTree() ORDER BY (cluster_name, name);
+) ENGINE = ReplacingMergeTree() ORDER BY (cluster_name, name);
 
 INSERT INTO ngf_inference_pools VALUES
     ('llama3-70b-prod', 'inference', 'meta-llama/Llama-3-70B-Instruct', 'v1.2', 'vllm', 'H100', 4, 6, 6, 2, 12, 'Ready', now() - INTERVAL 72 HOUR),

@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS ngf_inference_pools (
     max_replicas UInt32,
     status String,
     created_at DateTime
-) ENGINE = MergeTree() ORDER BY (cluster_name, name);
+) ENGINE = ReplacingMergeTree() ORDER BY (cluster_name, name);
 
 CREATE TABLE IF NOT EXISTS ngf_inference_logs (
     timestamp DateTime64(3),
