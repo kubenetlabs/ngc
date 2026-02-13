@@ -12,6 +12,10 @@ rules:
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["gateways/status", "httproutes/status"]
     verbs: ["get", "list", "watch"]
+  # NGINX Gateway Fabric policies
+  - apiGroups: ["gateway.nginx.org"]
+    resources: ["ratelimitpolicies", "clientsettingspolicies", "observabilitypolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Gateway Inference Extension
   - apiGroups: ["inference.networking.x-k8s.io"]
     resources: ["inferencepools"]
