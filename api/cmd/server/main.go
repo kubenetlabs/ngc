@@ -120,6 +120,11 @@ func main() {
 		slog.Info("using mock metrics provider")
 	}
 
+	// Start inference pool sync loop (updates ClickHouse pool status from CRDs).
+	if pool != nil && metricsProvider != nil {
+		go inference.RunSyncLoop(context.Background(), pool, metricsProvider, 30*time.Second)
+	}
+
 	// Initialize Prometheus client if configured.
 	var promClient *prom.Client
 	if *prometheusURL != "" {
