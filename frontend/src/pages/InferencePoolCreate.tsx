@@ -7,26 +7,22 @@ import apiClient from "@/api/client";
 interface InferenceStackPayload {
   name: string;
   namespace: string;
-  spec: {
-    model: {
-      name: string;
-      selector: Record<string, string>;
-    };
-    pool: {
-      targetPort: number;
-      replicas: number;
-    };
-    epp: {
-      strategy: string;
-      weights?: {
-        queueDepth: number;
-        kvCache: number;
-        prefixAffinity: number;
-      };
-    };
-    gpu: {
-      type: string;
-      countPerNode: number;
+  modelName: string;
+  servingBackend: string;
+  pool: {
+    gpuType: string;
+    gpuCount: number;
+    replicas: number;
+    minReplicas: number;
+    maxReplicas: number;
+    selector?: Record<string, string>;
+  };
+  epp?: {
+    strategy: string;
+    weights?: {
+      queueDepth: number;
+      kvCache: number;
+      prefixAffinity: number;
     };
   };
 }
@@ -63,10 +59,12 @@ export default function InferencePoolCreate() {
   const [modelName, setModelName] = useState("");
   const [selectorKey, setSelectorKey] = useState("model");
   const [selectorValue, setSelectorValue] = useState("");
-  const [targetPort, setTargetPort] = useState(8080);
   const [replicas, setReplicas] = useState(1);
   const [gpuType, setGpuType] = useState("nvidia-t4");
   const [gpuCount, setGpuCount] = useState(1);
+  const [servingBackend, setServingBackend] = useState("vllm");
+  const [minReplicas, setMinReplicas] = useState(1);
+  const [maxReplicas, setMaxReplicas] = useState(4);
   const [eppStrategy, setEppStrategy] = useState("round-robin");
   const [showWeights, setShowWeights] = useState(false);
   const [queueDepthWeight, setQueueDepthWeight] = useState(50);
@@ -88,29 +86,25 @@ export default function InferencePoolCreate() {
     const payload: InferenceStackPayload = {
       name,
       namespace,
-      spec: {
-        model: {
-          name: modelName,
-          selector: { [selectorKey]: selectorValue || modelName },
-        },
-        pool: {
-          targetPort,
-          replicas,
-        },
-        epp: {
-          strategy: eppStrategy,
-          ...(showWeights && {
-            weights: {
-              queueDepth: queueDepthWeight,
-              kvCache: kvCacheWeight,
-              prefixAffinity: prefixAffinityWeight,
-            },
-          }),
-        },
-        gpu: {
-          type: gpuType,
-          countPerNode: gpuCount,
-        },
+      modelName,
+      servingBackend,
+      pool: {
+        gpuType,
+        gpuCount,
+        replicas,
+        minReplicas,
+        maxReplicas,
+        ...(selectorValue && { selector: { [selectorKey]: selectorValue } }),
+      },
+      epp: {
+        strategy: eppStrategy,
+        ...(showWeights && {
+          weights: {
+            queueDepth: queueDepthWeight,
+            kvCache: kvCacheWeight,
+            prefixAffinity: prefixAffinityWeight,
+          },
+        }),
       },
     };
 
@@ -207,15 +201,17 @@ export default function InferencePoolCreate() {
           <h2 className="text-lg font-semibold">Pool Settings</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium">Target Port</label>
-              <input
-                type="number"
-                value={targetPort}
-                onChange={(e) => setTargetPort(Number(e.target.value))}
-                className={inputClass}
-                min={1}
-                max={65535}
-              />
+              <label className="block text-sm font-medium">Serving Backend</label>
+              <select
+                value={servingBackend}
+                onChange={(e) => setServingBackend(e.target.value)}
+                className={selectClass}
+              >
+                <option value="vllm">vLLM</option>
+                <option value="triton">Triton</option>
+                <option value="tgi">TGI</option>
+                <option value="ollama">Ollama</option>
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium">Replicas</label>
@@ -223,6 +219,26 @@ export default function InferencePoolCreate() {
                 type="number"
                 value={replicas}
                 onChange={(e) => setReplicas(Number(e.target.value))}
+                className={inputClass}
+                min={1}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">Min Replicas</label>
+              <input
+                type="number"
+                value={minReplicas}
+                onChange={(e) => setMinReplicas(Number(e.target.value))}
+                className={inputClass}
+                min={0}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">Max Replicas</label>
+              <input
+                type="number"
+                value={maxReplicas}
+                onChange={(e) => setMaxReplicas(Number(e.target.value))}
                 className={inputClass}
                 min={1}
               />
