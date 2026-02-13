@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/inference"
 )
 
 var inferenceStackGVR = schema.GroupVersionResource{
@@ -22,7 +24,8 @@ var inferenceStackGVR = schema.GroupVersionResource{
 
 // InferenceStackHandler handles InferenceStack CRD API requests using the dynamic client.
 type InferenceStackHandler struct {
-	DynamicClient dynamic.Interface
+	DynamicClient   dynamic.Interface
+	MetricsProvider inference.MetricsProvider
 }
 
 // getDynamicClient returns the dynamic client from the handler field or falls back
@@ -103,6 +106,25 @@ func (h *InferenceStackHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("creating inferencestack: %v", err))
 		return
 	}
+
+	// Sync pool metadata to ClickHouse so it appears in the pool list.
+	if h.MetricsProvider != nil {
+		_ = h.MetricsProvider.UpsertPool(r.Context(), inference.PoolStatus{
+			Name:           req.Name,
+			Namespace:      req.Namespace,
+			ModelName:      req.ModelName,
+			ModelVersion:   req.ModelVersion,
+			ServingBackend: req.ServingBackend,
+			GPUType:        req.Pool.GPUType,
+			GPUCount:       uint32(req.Pool.GPUCount),
+			Replicas:       uint32(req.Pool.Replicas),
+			MinReplicas:    uint32(req.Pool.MinReplicas),
+			MaxReplicas:    uint32(req.Pool.MaxReplicas),
+			Status:         "Pending",
+			CreatedAt:      time.Now(),
+		})
+	}
+
 	writeJSON(w, http.StatusCreated, toInferenceStackResponse(created))
 }
 
@@ -162,6 +184,12 @@ func (h *InferenceStackHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deleting inferencestack %s/%s: %v", ns, name, err))
 		return
 	}
+
+	// Remove pool metadata from ClickHouse.
+	if h.MetricsProvider != nil {
+		_ = h.MetricsProvider.DeletePool(r.Context(), name, ns)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "inferencestack deleted", "name": name, "namespace": ns})
 }
 

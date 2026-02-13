@@ -126,7 +126,7 @@ func (s *Server) registerRoutes() {
 	inf := &handlers.InferenceHandler{Provider: s.Config.MetricsProvider}
 	infMet := &handlers.InferenceMetricsHandler{Provider: s.Config.MetricsProvider}
 	infDiag := &handlers.InferenceDiagHandler{}
-	infStack := &handlers.InferenceStackHandler{}
+	infStack := &handlers.InferenceStackHandler{MetricsProvider: s.Config.MetricsProvider}
 	gwBundle := &handlers.GatewayBundleHandler{}
 	coex := &handlers.CoexistenceHandler{}
 	xc := &handlers.XCHandler{}
