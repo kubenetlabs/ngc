@@ -40,9 +40,10 @@ const GPU_TYPES = [
 ];
 
 const EPP_STRATEGIES = [
-  { value: "round-robin", label: "Round Robin" },
-  { value: "least-load", label: "Least Load" },
-  { value: "prefix-hash", label: "Prefix Hash" },
+  { value: "composite", label: "Composite" },
+  { value: "least_queue", label: "Least Queue" },
+  { value: "kv_cache", label: "KV Cache" },
+  { value: "prefix_affinity", label: "Prefix Affinity" },
 ];
 
 async function createInferenceStack(payload: InferenceStackPayload) {
@@ -65,7 +66,7 @@ export default function InferencePoolCreate() {
   const [servingBackend, setServingBackend] = useState("vllm");
   const [minReplicas, setMinReplicas] = useState(1);
   const [maxReplicas, setMaxReplicas] = useState(4);
-  const [eppStrategy, setEppStrategy] = useState("round-robin");
+  const [eppStrategy, setEppStrategy] = useState("composite");
   const [showWeights, setShowWeights] = useState(false);
   const [queueDepthWeight, setQueueDepthWeight] = useState(50);
   const [kvCacheWeight, setKvCacheWeight] = useState(30);
