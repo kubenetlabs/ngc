@@ -36,9 +36,11 @@ const inputClass =
 const selectClass = inputClass;
 
 const GPU_TYPES = [
+  { value: "nvidia-t4", label: "NVIDIA T4" },
+  { value: "nvidia-l4", label: "NVIDIA L4" },
+  { value: "nvidia-l40s", label: "NVIDIA L40S" },
   { value: "nvidia-a100", label: "NVIDIA A100" },
   { value: "nvidia-h100", label: "NVIDIA H100" },
-  { value: "nvidia-l4", label: "NVIDIA L4" },
 ];
 
 const EPP_STRATEGIES = [
@@ -63,7 +65,7 @@ export default function InferencePoolCreate() {
   const [selectorValue, setSelectorValue] = useState("");
   const [targetPort, setTargetPort] = useState(8080);
   const [replicas, setReplicas] = useState(1);
-  const [gpuType, setGpuType] = useState("nvidia-a100");
+  const [gpuType, setGpuType] = useState("nvidia-t4");
   const [gpuCount, setGpuCount] = useState(1);
   const [eppStrategy, setEppStrategy] = useState("round-robin");
   const [showWeights, setShowWeights] = useState(false);
