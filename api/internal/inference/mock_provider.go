@@ -133,7 +133,7 @@ func (m *MockProvider) GetMetricsSummary(_ context.Context, _ string) (*MetricsS
 		P95TTFT:            m.varyFloat(280, 60),
 		P99TTFT:            m.varyFloat(450, 80),
 		AvgTPS:             m.varyFloat(85, 20),
-		TotalTokens:        int64(m.varyFloat(2_500_000, 500_000)),
+		TotalTokens:        uint64(m.varyFloat(2_500_000, 500_000)),
 		AvgQueueDepth:      m.varyFloat(4.5, 2),
 		AvgKVCachePct:      m.varyFloat(62, 15),
 		PrefixCacheHitRate: m.varyFloat(0.35, 0.1),
@@ -152,16 +152,16 @@ func (m *MockProvider) GetPodMetrics(_ context.Context, pool string) ([]PodMetri
 		pods[i] = PodMetrics{
 			PodName:          fmt.Sprintf("%s-pod-%d", pool, i),
 			NodeName:         fmt.Sprintf("gpu-node-%d", i%3),
-			GPUID:            i % int(p.GPUCount),
+			GPUID:            uint8(i % int(p.GPUCount)),
 			GPUType:          p.GPUType,
-			QueueDepth:       m.varyInt(5, 4),
+			QueueDepth:       uint16(m.varyInt(5, 4)),
 			KVCacheUtilPct:   m.varyFloat(60, 20),
-			PrefixCacheState: m.rng.Float64() > 0.6,
+			PrefixCacheState: boolToUint8(m.rng.Float64() > 0.6),
 			GPUUtilPct:       m.varyFloat(70, 20),
-			GPUMemUsedMB:     m.varyInt(60000, 15000),
+			GPUMemUsedMB:     uint32(m.varyInt(60000, 15000)),
 			GPUMemTotalMB:    81920,
-			GPUTemperatureC:  m.varyInt(65, 10),
-			RequestsInFlight: m.varyInt(3, 2),
+			GPUTemperatureC:  uint16(m.varyInt(65, 10)),
+			RequestsInFlight: uint16(m.varyInt(3, 2)),
 		}
 	}
 	return pods, nil
@@ -185,11 +185,11 @@ func (m *MockProvider) GetRecentEPPDecisions(_ context.Context, pool string, lim
 			RequestID:            fmt.Sprintf("req-%s-%04d", pool, m.rng.Intn(10000)),
 			SelectedPod:          fmt.Sprintf("%s-pod-%d", pool, m.rng.Intn(replicas)),
 			Reason:               strategies[m.rng.Intn(len(strategies))],
-			QueueDepth:           m.varyInt(4, 3),
+			QueueDepth:           uint32(m.varyInt(4, 3)),
 			KVCachePct:           m.varyFloat(55, 20),
-			PrefixCacheHit:       m.rng.Float64() > 0.65,
-			CandidatesConsidered: replicas,
-			DecisionLatencyUs:    m.varyInt(150, 80),
+			PrefixCacheHit:       boolToUint8(m.rng.Float64() > 0.65),
+			CandidatesConsidered: uint32(replicas),
+			DecisionLatencyUs:    uint32(m.varyInt(150, 80)),
 		}
 	}
 	return decisions, nil
@@ -198,14 +198,14 @@ func (m *MockProvider) GetRecentEPPDecisions(_ context.Context, pool string, lim
 func (m *MockProvider) GetTTFTHistogram(_ context.Context, _ string) ([]HistogramBucket, error) {
 	// Log-normal-ish distribution of TTFT values.
 	buckets := []HistogramBucket{
-		{RangeStart: 0, RangeEnd: 50, Count: m.varyInt(45, 15)},
-		{RangeStart: 50, RangeEnd: 100, Count: m.varyInt(120, 30)},
-		{RangeStart: 100, RangeEnd: 150, Count: m.varyInt(200, 40)},
-		{RangeStart: 150, RangeEnd: 200, Count: m.varyInt(170, 35)},
-		{RangeStart: 200, RangeEnd: 250, Count: m.varyInt(100, 25)},
-		{RangeStart: 250, RangeEnd: 300, Count: m.varyInt(55, 15)},
-		{RangeStart: 300, RangeEnd: 400, Count: m.varyInt(30, 10)},
-		{RangeStart: 400, RangeEnd: 500, Count: m.varyInt(12, 5)},
+		{RangeStart: 0, RangeEnd: 50, Count: uint64(m.varyInt(45, 15))},
+		{RangeStart: 50, RangeEnd: 100, Count: uint64(m.varyInt(120, 30))},
+		{RangeStart: 100, RangeEnd: 150, Count: uint64(m.varyInt(200, 40))},
+		{RangeStart: 150, RangeEnd: 200, Count: uint64(m.varyInt(170, 35))},
+		{RangeStart: 200, RangeEnd: 250, Count: uint64(m.varyInt(100, 25))},
+		{RangeStart: 250, RangeEnd: 300, Count: uint64(m.varyInt(55, 15))},
+		{RangeStart: 300, RangeEnd: 400, Count: uint64(m.varyInt(30, 10))},
+		{RangeStart: 400, RangeEnd: 500, Count: uint64(m.varyInt(12, 5))},
 	}
 	return buckets, nil
 }
@@ -257,6 +257,13 @@ func (m *MockProvider) findPool(name string) *PoolStatus {
 		}
 	}
 	return nil
+}
+
+func boolToUint8(b bool) uint8 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (m *MockProvider) varyFloat(base, spread float64) float64 {

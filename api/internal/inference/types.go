@@ -25,16 +25,16 @@ type PoolStatus struct {
 type PodMetrics struct {
 	PodName          string  `json:"podName"`
 	NodeName         string  `json:"nodeName"`
-	GPUID            int     `json:"gpuId"`
+	GPUID            uint8   `json:"gpuId"`
 	GPUType          string  `json:"gpuType"`
-	QueueDepth       int     `json:"queueDepth"`
+	QueueDepth       uint16  `json:"queueDepth"`
 	KVCacheUtilPct   float64 `json:"kvCacheUtilPct"`
-	PrefixCacheState bool    `json:"prefixCacheState"`
+	PrefixCacheState uint8   `json:"prefixCacheState"`
 	GPUUtilPct       float64 `json:"gpuUtilPct"`
-	GPUMemUsedMB     int     `json:"gpuMemUsedMb"`
-	GPUMemTotalMB    int     `json:"gpuMemTotalMb"`
-	GPUTemperatureC  int     `json:"gpuTemperatureC"`
-	RequestsInFlight int     `json:"requestsInFlight"`
+	GPUMemUsedMB     uint32  `json:"gpuMemUsedMb"`
+	GPUMemTotalMB    uint32  `json:"gpuMemTotalMb"`
+	GPUTemperatureC  uint16  `json:"gpuTemperatureC"`
+	RequestsInFlight uint16  `json:"requestsInFlight"`
 }
 
 // EPPDecision represents a single endpoint picker routing decision.
@@ -43,11 +43,11 @@ type EPPDecision struct {
 	RequestID            string    `json:"requestId"`
 	SelectedPod          string    `json:"selectedPod"`
 	Reason               string    `json:"reason"`
-	QueueDepth           int       `json:"queueDepth"`
+	QueueDepth           uint32    `json:"queueDepth"`
 	KVCachePct           float64   `json:"kvCachePct"`
-	PrefixCacheHit       bool      `json:"prefixCacheHit"`
-	CandidatesConsidered int       `json:"candidatesConsidered"`
-	DecisionLatencyUs    int       `json:"decisionLatencyUs"`
+	PrefixCacheHit       uint8     `json:"prefixCacheHit"`
+	CandidatesConsidered uint32    `json:"candidatesConsidered"`
+	DecisionLatencyUs    uint32    `json:"decisionLatencyUs"`
 }
 
 // MetricsSummary holds aggregate inference metrics.
@@ -56,7 +56,7 @@ type MetricsSummary struct {
 	P95TTFT           float64 `json:"p95TTFT"`
 	P99TTFT           float64 `json:"p99TTFT"`
 	AvgTPS            float64 `json:"avgTPS"`
-	TotalTokens       int64   `json:"totalTokens"`
+	TotalTokens       uint64  `json:"totalTokens"`
 	AvgQueueDepth     float64 `json:"avgQueueDepth"`
 	AvgKVCachePct     float64 `json:"avgKVCachePct"`
 	PrefixCacheHitRate float64 `json:"prefixCacheHitRate"`
@@ -67,7 +67,7 @@ type MetricsSummary struct {
 type HistogramBucket struct {
 	RangeStart float64 `json:"rangeStart"`
 	RangeEnd   float64 `json:"rangeEnd"`
-	Count      int     `json:"count"`
+	Count      uint64  `json:"count"`
 }
 
 // TimeseriesPoint is a single time+value pair for line/area charts.
