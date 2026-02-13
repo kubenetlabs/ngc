@@ -39,7 +39,24 @@ data:
     ) ENGINE = MergeTree()
     PARTITION BY toYYYYMMDD(timestamp)
     ORDER BY (cluster_name, gateway, route, timestamp)
-    TTL timestamp + INTERVAL 7 DAY;
+    TTL toDateTime(timestamp) + INTERVAL 7 DAY;
+
+    CREATE TABLE IF NOT EXISTS ngf_inference_pools (
+        name String,
+        cluster_name LowCardinality(String) DEFAULT '',
+        namespace String,
+        model_name String,
+        model_version String,
+        serving_backend String,
+        gpu_type String,
+        gpu_count UInt32,
+        replicas UInt32,
+        ready_replicas UInt32,
+        min_replicas UInt32,
+        max_replicas UInt32,
+        status String,
+        created_at DateTime
+    ) ENGINE = MergeTree() ORDER BY (cluster_name, name);
 
     CREATE TABLE IF NOT EXISTS ngf_inference_logs (
         timestamp DateTime64(3),
@@ -83,7 +100,7 @@ data:
     ) ENGINE = MergeTree()
     PARTITION BY toYYYYMMDD(timestamp)
     ORDER BY (cluster_name, inference_pool, model_name, timestamp)
-    TTL timestamp + INTERVAL 14 DAY;
+    TTL toDateTime(timestamp) + INTERVAL 14 DAY;
 
     CREATE MATERIALIZED VIEW IF NOT EXISTS ngf_metrics_1m
     ENGINE = AggregatingMergeTree()
