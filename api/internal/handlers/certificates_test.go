@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -240,7 +241,7 @@ func TestCertificateHandler_Expiring_HappyPath(t *testing.T) {
 	}
 }
 
-func TestCertificateHandler_Create_Returns501(t *testing.T) {
+func TestCertificateHandler_Create_NoClusterContext(t *testing.T) {
 	handler := &CertificateHandler{}
 
 	r := chi.NewRouter()
@@ -250,7 +251,37 @@ func TestCertificateHandler_Create_Returns501(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("expected status 501, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCertificateHandler_Create_BadRequest(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	k8s := kubernetes.NewForTest(fakeClient)
+
+	handler := &CertificateHandler{}
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := cluster.WithClient(r.Context(), k8s)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
+	r.Post("/certificates", handler.Create)
+
+	// Missing required fields
+	body := `{"name":"test"}`
+	req := httptest.NewRequest(http.MethodPost, "/certificates", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", w.Code, w.Body.String())
 	}
 }

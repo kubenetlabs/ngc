@@ -1,0 +1,133 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
+)
+
+// TLSRouteHandler handles TLSRoute API requests.
+type TLSRouteHandler struct{}
+
+// List returns all TLSRoutes, optionally filtered by ?namespace= query param.
+func (h *TLSRouteHandler) List(w http.ResponseWriter, r *http.Request) {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	ns := r.URL.Query().Get("namespace")
+	routes, err := k8s.ListTLSRoutes(r.Context(), ns)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	resp := make([]TLSRouteResponse, 0, len(routes))
+	for i := range routes {
+		resp = append(resp, toTLSRouteResponse(&routes[i]))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// Get returns a single TLSRoute by namespace and name.
+func (h *TLSRouteHandler) Get(w http.ResponseWriter, r *http.Request) {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	ns := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+
+	route, err := k8s.GetTLSRoute(r.Context(), ns, name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toTLSRouteResponse(route))
+}
+
+// Create creates a new TLSRoute.
+func (h *TLSRouteHandler) Create(w http.ResponseWriter, r *http.Request) {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	var req CreateTLSRouteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	if req.Name == "" || req.Namespace == "" || len(req.ParentRefs) == 0 || len(req.Rules) == 0 {
+		writeError(w, http.StatusBadRequest, "name, namespace, at least one parentRef, and at least one rule are required")
+		return
+	}
+
+	route := toTLSRouteObject(req)
+	created, err := k8s.CreateTLSRoute(r.Context(), route)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, toTLSRouteResponse(created))
+}
+
+// Update modifies an existing TLSRoute.
+func (h *TLSRouteHandler) Update(w http.ResponseWriter, r *http.Request) {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	ns := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+
+	var req UpdateTLSRouteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	existing, err := k8s.GetTLSRoute(r.Context(), ns, name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	applyUpdateToTLSRoute(existing, req)
+
+	updated, err := k8s.UpdateTLSRoute(r.Context(), existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toTLSRouteResponse(updated))
+}
+
+// Delete removes a TLSRoute.
+func (h *TLSRouteHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	ns := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+
+	if err := k8s.DeleteTLSRoute(r.Context(), ns, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "tlsroute deleted", "name": name, "namespace": ns})
+}

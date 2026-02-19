@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gatewayv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -44,6 +45,9 @@ func New(kubeconfig string) (*Client, error) {
 	}
 	if err := gatewayv1.Install(scheme); err != nil {
 		return nil, fmt.Errorf("adding gateway-api scheme: %w", err)
+	}
+	if err := gatewayv1alpha2.Install(scheme); err != nil {
+		return nil, fmt.Errorf("adding gateway-api v1alpha2 scheme: %w", err)
 	}
 	if err := apiextensionsv1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding apiextensions scheme: %w", err)
@@ -78,6 +82,9 @@ func NewFromContext(kubeconfigPath, contextName string) (*Client, error) {
 	}
 	if err := gatewayv1.Install(scheme); err != nil {
 		return nil, fmt.Errorf("adding gateway-api scheme: %w", err)
+	}
+	if err := gatewayv1alpha2.Install(scheme); err != nil {
+		return nil, fmt.Errorf("adding gateway-api v1alpha2 scheme: %w", err)
 	}
 	if err := apiextensionsv1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding apiextensions scheme: %w", err)
@@ -117,6 +124,9 @@ func NewFromRestConfig(cfg *rest.Config) (*Client, error) {
 	}
 	if err := gatewayv1.Install(scheme); err != nil {
 		return nil, fmt.Errorf("adding gateway-api scheme: %w", err)
+	}
+	if err := gatewayv1alpha2.Install(scheme); err != nil {
+		return nil, fmt.Errorf("adding gateway-api v1alpha2 scheme: %w", err)
 	}
 	if err := apiextensionsv1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding apiextensions scheme: %w", err)

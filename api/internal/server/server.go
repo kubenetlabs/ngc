@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,13 +22,6 @@ import (
 	mc "github.com/kubenetlabs/ngc/api/internal/multicluster"
 	prom "github.com/kubenetlabs/ngc/api/internal/prometheus"
 )
-
-// writeNotImpl sends a 501 Not Implemented JSON response.
-func writeNotImpl(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
-}
 
 // Config holds server dependencies.
 type Config struct {
@@ -115,6 +107,10 @@ func (s *Server) Run(addr string) error {
 func (s *Server) registerRoutes() {
 	gw := &handlers.GatewayHandler{}
 	rt := &handlers.RouteHandler{}
+	grpcRt := &handlers.GRPCRouteHandler{}
+	tlsRt := &handlers.TLSRouteHandler{}
+	tcpRt := &handlers.TCPRouteHandler{}
+	udpRt := &handlers.UDPRouteHandler{}
 	cfgHandler := &handlers.ConfigHandler{}
 	clusterHandler := &handlers.ClusterHandler{Manager: s.Config.ClusterManager, Pool: s.Config.Pool}
 	pol := &handlers.PolicyHandler{}
@@ -164,14 +160,14 @@ func (s *Server) registerRoutes() {
 			// Cluster-scoped resource routes
 			r.Group(func(r chi.Router) {
 				r.Use(ClusterResolver(s.Config.ClusterManager))
-				s.mountResourceRoutes(r, gw, rt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, infStack, gwBundle, coex, xc, mig, aud, alert)
+				s.mountResourceRoutes(r, gw, rt, grpcRt, tlsRt, tcpRt, udpRt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, infStack, gwBundle, coex, xc, mig, aud, alert)
 			})
 		})
 
 		// Legacy routes (backward compat — uses default cluster)
 		r.Group(func(r chi.Router) {
 			r.Use(ClusterResolver(s.Config.ClusterManager))
-			s.mountResourceRoutes(r, gw, rt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, infStack, gwBundle, coex, xc, mig, aud, alert)
+			s.mountResourceRoutes(r, gw, rt, grpcRt, tlsRt, tcpRt, udpRt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, infStack, gwBundle, coex, xc, mig, aud, alert)
 		})
 
 		// WebSocket
@@ -192,6 +188,10 @@ func (s *Server) mountResourceRoutes(
 	r chi.Router,
 	gw *handlers.GatewayHandler,
 	rt *handlers.RouteHandler,
+	grpcRt *handlers.GRPCRouteHandler,
+	tlsRt *handlers.TLSRouteHandler,
+	tcpRt *handlers.TCPRouteHandler,
+	udpRt *handlers.UDPRouteHandler,
 	cfgHandler *handlers.ConfigHandler,
 	pol *handlers.PolicyHandler,
 	cert *handlers.CertificateHandler,
@@ -249,40 +249,40 @@ func (s *Server) mountResourceRoutes(
 		r.Post("/{namespace}/{name}/simulate", rt.Simulate)
 	})
 
-	// gRPC Routes (not yet implemented — return 501)
+	// gRPC Routes (namespace-aware)
 	r.Route("/grpcroutes", func(r chi.Router) {
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Post("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Get("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Put("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Delete("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Get("/", grpcRt.List)
+		r.Post("/", grpcRt.Create)
+		r.Get("/{namespace}/{name}", grpcRt.Get)
+		r.Put("/{namespace}/{name}", grpcRt.Update)
+		r.Delete("/{namespace}/{name}", grpcRt.Delete)
 	})
 
-	// TLS Routes (not yet implemented — return 501)
+	// TLS Routes (namespace-aware)
 	r.Route("/tlsroutes", func(r chi.Router) {
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Post("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Get("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Put("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Delete("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Get("/", tlsRt.List)
+		r.Post("/", tlsRt.Create)
+		r.Get("/{namespace}/{name}", tlsRt.Get)
+		r.Put("/{namespace}/{name}", tlsRt.Update)
+		r.Delete("/{namespace}/{name}", tlsRt.Delete)
 	})
 
-	// TCP Routes (not yet implemented — return 501)
+	// TCP Routes (namespace-aware)
 	r.Route("/tcproutes", func(r chi.Router) {
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Post("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Get("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Put("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Delete("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Get("/", tcpRt.List)
+		r.Post("/", tcpRt.Create)
+		r.Get("/{namespace}/{name}", tcpRt.Get)
+		r.Put("/{namespace}/{name}", tcpRt.Update)
+		r.Delete("/{namespace}/{name}", tcpRt.Delete)
 	})
 
-	// UDP Routes (not yet implemented — return 501)
+	// UDP Routes (namespace-aware)
 	r.Route("/udproutes", func(r chi.Router) {
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Post("/", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Get("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Put("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
-		r.Delete("/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) { writeNotImpl(w) })
+		r.Get("/", udpRt.List)
+		r.Post("/", udpRt.Create)
+		r.Get("/{namespace}/{name}", udpRt.Get)
+		r.Put("/{namespace}/{name}", udpRt.Update)
+		r.Delete("/{namespace}/{name}", udpRt.Delete)
 	})
 
 	// Policies

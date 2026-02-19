@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -197,9 +198,40 @@ func (h *GatewayHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "gateway deleted", "name": name, "namespace": ns})
 }
 
-// Deploy triggers a gateway deployment.
+// Deploy triggers a gateway deployment by annotating the gateway
+// to trigger operator reconciliation.
 func (h *GatewayHandler) Deploy(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	ns := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+
+	gw, err := k8s.GetGateway(r.Context(), ns, name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway not found: %v", err))
+		return
+	}
+
+	// Add/update annotation to trigger operator reconciliation
+	if gw.Annotations == nil {
+		gw.Annotations = make(map[string]string)
+	}
+	gw.Annotations["ngf-console/deploy-requested"] = time.Now().UTC().Format(time.RFC3339)
+
+	if _, err := k8s.UpdateGateway(r.Context(), gw); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("updating gateway annotation: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message":   "deploy triggered",
+		"name":      name,
+		"namespace": ns,
+	})
 }
 
 // writeNotImplemented sends a 501 JSON response.

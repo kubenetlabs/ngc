@@ -167,6 +167,14 @@ func (c *Client) GetSecret(ctx context.Context, namespace, name string) (*corev1
 	return &secret, nil
 }
 
+// CreateSecret creates a new Secret and returns it.
+func (c *Client) CreateSecret(ctx context.Context, secret *corev1.Secret) error {
+	if err := c.client.Create(ctx, secret); err != nil {
+		return fmt.Errorf("creating secret %s/%s: %w", secret.Namespace, secret.Name, err)
+	}
+	return nil
+}
+
 // DeleteSecret deletes a Secret by namespace and name.
 func (c *Client) DeleteSecret(ctx context.Context, namespace, name string) error {
 	secret, err := c.GetSecret(ctx, namespace, name)

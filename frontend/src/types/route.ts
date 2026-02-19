@@ -120,3 +120,135 @@ export const createHTTPRouteSchema = z.object({
 });
 
 export type CreateHTTPRouteFormData = z.infer<typeof createHTTPRouteSchema>;
+
+// --- GRPCRoute types ---
+
+export interface GRPCMethodMatch {
+  type?: "Exact" | "RegularExpression";
+  service?: string;
+  method?: string;
+}
+
+export interface GRPCRouteMatch {
+  method?: GRPCMethodMatch;
+  headers?: { type: "Exact" | "RegularExpression"; name: string; value: string }[];
+}
+
+export interface GRPCRouteRule {
+  matches?: GRPCRouteMatch[];
+  backendRefs?: BackendRef[];
+}
+
+export interface GRPCRoute {
+  name: string;
+  namespace: string;
+  parentRefs: ParentRef[];
+  hostnames?: string[];
+  rules: GRPCRouteRule[];
+  status?: { parents: { parentRef: ParentRef; controllerName: string; conditions: Condition[] }[] };
+  createdAt: string;
+}
+
+export interface CreateGRPCRoutePayload {
+  name: string;
+  namespace: string;
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  hostnames?: string[];
+  rules: {
+    matches?: { method?: { type?: string; service?: string; method?: string }; headers?: { type: string; name: string; value: string }[] }[];
+    backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[];
+  }[];
+}
+
+export interface UpdateGRPCRoutePayload {
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  hostnames?: string[];
+  rules: {
+    matches?: { method?: { type?: string; service?: string; method?: string }; headers?: { type: string; name: string; value: string }[] }[];
+    backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[];
+  }[];
+}
+
+// --- TLSRoute types ---
+
+export interface TLSRouteRule {
+  backendRefs?: BackendRef[];
+}
+
+export interface TLSRoute {
+  name: string;
+  namespace: string;
+  parentRefs: ParentRef[];
+  hostnames?: string[];
+  rules: TLSRouteRule[];
+  status?: { parents: { parentRef: ParentRef; controllerName: string; conditions: Condition[] }[] };
+  createdAt: string;
+}
+
+export interface CreateTLSRoutePayload {
+  name: string;
+  namespace: string;
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  hostnames?: string[];
+  rules: { backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[] }[];
+}
+
+export interface UpdateTLSRoutePayload {
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  hostnames?: string[];
+  rules: { backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[] }[];
+}
+
+// --- TCPRoute types ---
+
+export interface TCPRouteRule {
+  backendRefs?: BackendRef[];
+}
+
+export interface TCPRoute {
+  name: string;
+  namespace: string;
+  parentRefs: ParentRef[];
+  rules: TCPRouteRule[];
+  status?: { parents: { parentRef: ParentRef; controllerName: string; conditions: Condition[] }[] };
+  createdAt: string;
+}
+
+export interface CreateTCPRoutePayload {
+  name: string;
+  namespace: string;
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  rules: { backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[] }[];
+}
+
+export interface UpdateTCPRoutePayload {
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  rules: { backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[] }[];
+}
+
+// --- UDPRoute types ---
+
+export interface UDPRouteRule {
+  backendRefs?: BackendRef[];
+}
+
+export interface UDPRoute {
+  name: string;
+  namespace: string;
+  parentRefs: ParentRef[];
+  rules: UDPRouteRule[];
+  status?: { parents: { parentRef: ParentRef; controllerName: string; conditions: Condition[] }[] };
+  createdAt: string;
+}
+
+export interface CreateUDPRoutePayload {
+  name: string;
+  namespace: string;
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  rules: { backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[] }[];
+}
+
+export interface UpdateUDPRoutePayload {
+  parentRefs: { name: string; namespace?: string; sectionName?: string }[];
+  rules: { backendRefs?: { name: string; namespace?: string; port?: number; weight?: number }[] }[];
+}

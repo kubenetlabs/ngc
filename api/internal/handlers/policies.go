@@ -231,9 +231,75 @@ func (h *PolicyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// PolicyConflict represents a detected policy conflict.
+type PolicyConflict struct {
+	Severity    string   `json:"severity"` // "high", "medium", "low"
+	PolicyNames []string `json:"policyNames"`
+	TargetRef   string   `json:"targetRef"`
+	Description string   `json:"description"`
+}
+
 // Conflicts returns detected policy conflicts.
 func (h *PolicyHandler) Conflicts(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+	gvr, _, ok := h.resolvePolicyType(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown policy type")
+		return
+	}
+
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+	dc := k8s.DynamicClient()
+	if dc == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	list, err := dc.Resource(gvr).Namespace("").List(r.Context(), metav1.ListOptions{})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("listing policies: %v", err))
+		return
+	}
+
+	// Build a map of targetRef → policy names
+	targetRefPolicies := make(map[string][]string)
+	for _, item := range list.Items {
+		spec, _ := item.Object["spec"].(map[string]interface{})
+		if spec == nil {
+			continue
+		}
+		targetRef, _ := spec["targetRef"].(map[string]interface{})
+		if targetRef == nil {
+			continue
+		}
+
+		// Build a key from targetRef fields
+		group, _ := targetRef["group"].(string)
+		kind, _ := targetRef["kind"].(string)
+		name, _ := targetRef["name"].(string)
+		ns := item.GetNamespace()
+		key := fmt.Sprintf("%s/%s/%s/%s", group, kind, ns, name)
+
+		targetRefPolicies[key] = append(targetRefPolicies[key], item.GetNamespace()+"/"+item.GetName())
+	}
+
+	// Find conflicts (same targetRef with multiple policies)
+	conflicts := make([]PolicyConflict, 0)
+	for targetRef, policyNames := range targetRefPolicies {
+		if len(policyNames) > 1 {
+			conflicts = append(conflicts, PolicyConflict{
+				Severity:    "high",
+				PolicyNames: policyNames,
+				TargetRef:   targetRef,
+				Description: fmt.Sprintf("%d policies target the same resource", len(policyNames)),
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, conflicts)
 }
 
 // PolicyResponse is the API response for a policy resource.

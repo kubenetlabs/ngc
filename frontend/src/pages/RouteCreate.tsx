@@ -1,13 +1,66 @@
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useParams } from "react-router-dom";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createHTTPRoute } from "@/api/routes";
+import { createGRPCRoute } from "@/api/grpcroutes";
+import { createTLSRoute } from "@/api/tlsroutes";
+import { createTCPRoute } from "@/api/tcproutes";
+import { createUDPRoute } from "@/api/udproutes";
 import { fetchGateways } from "@/api/gateways";
 import { createHTTPRouteSchema, type CreateHTTPRouteFormData, type CreateHTTPRoutePayload } from "@/types/route";
+import type { RouteType } from "@/types/route";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
+import { z } from "zod";
+
+// Simple schema for TLS/TCP/UDP routes (no matches)
+const simpleRouteSchema = z.object({
+  name: z.string().min(1, "Name is required").max(253).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, "Must be a valid Kubernetes name"),
+  namespace: z.string().min(1, "Namespace is required"),
+  parentRefs: z.array(z.object({
+    name: z.string().min(1, "Gateway name is required"),
+    namespace: z.string().optional(),
+    sectionName: z.string().optional(),
+  })).min(1, "At least one parent gateway is required"),
+  hostnames: z.string().optional(),
+  rules: z.array(z.object({
+    backendRefs: z.array(z.object({
+      name: z.string().min(1, "Service name is required"),
+      namespace: z.string().optional(),
+      port: z.number().int().min(1).max(65535).optional(),
+      weight: z.number().int().min(0).optional(),
+    })).min(1, "At least one backend ref is required"),
+  })).min(1, "At least one rule is required"),
+});
+
+type SimpleRouteFormData = z.infer<typeof simpleRouteSchema>;
+
+function getRouteTypeLabel(type: RouteType): string {
+  switch (type) {
+    case "HTTPRoute": return "HTTPRoute";
+    case "GRPCRoute": return "gRPC Route";
+    case "TLSRoute": return "TLS Route";
+    case "TCPRoute": return "TCP Route";
+    case "UDPRoute": return "UDP Route";
+  }
+}
+
+function hasHostnames(type: RouteType): boolean {
+  return type === "HTTPRoute" || type === "GRPCRoute" || type === "TLSRoute";
+}
 
 export default function RouteCreate() {
+  const { type } = useParams<{ type: string }>();
+  const routeType = (type as RouteType) || "HTTPRoute";
+
+  if (routeType === "HTTPRoute") {
+    return <HTTPRouteCreateForm />;
+  }
+
+  return <SimpleRouteCreateForm routeType={routeType} />;
+}
+
+function HTTPRouteCreateForm() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activeCluster = useActiveCluster();
@@ -240,6 +293,240 @@ export default function RouteCreate() {
   );
 }
 
+function SimpleRouteCreateForm({ routeType }: { routeType: RouteType }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const activeCluster = useActiveCluster();
+
+  const { data: gateways } = useQuery({
+    queryKey: ["gateways", activeCluster],
+    queryFn: () => fetchGateways(),
+  });
+
+  const {
+    register,
+    control,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<SimpleRouteFormData>({
+    resolver: zodResolver(simpleRouteSchema),
+    defaultValues: {
+      name: "",
+      namespace: "default",
+      parentRefs: [{ name: "", namespace: "", sectionName: "" }],
+      hostnames: "",
+      rules: [
+        {
+          backendRefs: [{ name: "", port: 443, weight: 1, namespace: "" }],
+        },
+      ],
+    },
+  });
+
+  const { fields: parentRefFields, append: appendParentRef, remove: removeParentRef } = useFieldArray({ control, name: "parentRefs" });
+  const { fields: ruleFields, append: appendRule, remove: removeRule } = useFieldArray({ control, name: "rules" });
+
+  const mutation = useMutation({
+    mutationFn: (payload: any) => {
+      switch (routeType) {
+        case "GRPCRoute": return createGRPCRoute(payload);
+        case "TLSRoute": return createTLSRoute(payload);
+        case "TCPRoute": return createTCPRoute(payload);
+        case "UDPRoute": return createUDPRoute(payload);
+        default: return createHTTPRoute(payload);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [routeType.toLowerCase() + "s"] });
+      navigate("/routes");
+    },
+  });
+
+  const onSubmit = (data: SimpleRouteFormData) => {
+    const payload: any = {
+      name: data.name,
+      namespace: data.namespace,
+      parentRefs: data.parentRefs.map((p) => ({
+        name: p.name,
+        namespace: p.namespace || undefined,
+        sectionName: p.sectionName || undefined,
+      })),
+      rules: data.rules.map((rule) => ({
+        backendRefs: rule.backendRefs.map((br) => ({
+          name: br.name,
+          namespace: br.namespace || undefined,
+          port: br.port,
+          weight: br.weight,
+        })),
+      })),
+    };
+
+    if (hasHostnames(routeType) && data.hostnames) {
+      payload.hostnames = data.hostnames.split(",").map((h: string) => h.trim()).filter(Boolean);
+    }
+
+    mutation.mutate(payload);
+  };
+
+  const label = getRouteTypeLabel(routeType);
+
+  return (
+    <div>
+      <div className="mb-6">
+        <Link to="/routes" className="text-sm text-blue-400 hover:underline">
+          &larr; Back to Routes
+        </Link>
+      </div>
+
+      <h1 className="text-2xl font-bold">Create {label}</h1>
+      <p className="mt-1 text-muted-foreground">Create a new {label} resource.</p>
+
+      {mutation.isError && (
+        <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {String(mutation.error)}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit(onSubmit)} className="mt-6 max-w-2xl space-y-6">
+        {/* Name */}
+        <div>
+          <label htmlFor="name" className="block text-sm font-medium">Name</label>
+          <input
+            id="name"
+            {...register("name")}
+            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="my-route"
+          />
+          {errors.name && <p className="mt-1 text-xs text-red-400">{errors.name.message}</p>}
+        </div>
+
+        {/* Namespace */}
+        <div>
+          <label htmlFor="namespace" className="block text-sm font-medium">Namespace</label>
+          <input
+            id="namespace"
+            {...register("namespace")}
+            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="default"
+          />
+          {errors.namespace && <p className="mt-1 text-xs text-red-400">{errors.namespace.message}</p>}
+        </div>
+
+        {/* Parent Refs */}
+        <div>
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-medium">Parent Gateways</label>
+            <button
+              type="button"
+              onClick={() => appendParentRef({ name: "", namespace: "", sectionName: "" })}
+              className="text-sm text-blue-400 hover:underline"
+            >
+              + Add Gateway
+            </button>
+          </div>
+          {errors.parentRefs?.root && (
+            <p className="mt-1 text-xs text-red-400">{errors.parentRefs.root.message}</p>
+          )}
+          <div className="mt-2 space-y-3">
+            {parentRefFields.map((field, index) => (
+              <div key={field.id} className="flex items-start gap-3 rounded-lg border border-border p-3">
+                <div className="flex-1">
+                  <label className="block text-xs text-muted-foreground">Gateway</label>
+                  <select
+                    {...register(`parentRefs.${index}.name`)}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="">Select a gateway...</option>
+                    {gateways?.map((gw) => (
+                      <option key={`${gw.namespace}/${gw.name}`} value={gw.name}>
+                        {gw.namespace}/{gw.name}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.parentRefs?.[index]?.name && (
+                    <p className="mt-1 text-xs text-red-400">{errors.parentRefs[index].name.message}</p>
+                  )}
+                </div>
+                <div className="w-32">
+                  <label className="block text-xs text-muted-foreground">Section (opt)</label>
+                  <input
+                    {...register(`parentRefs.${index}.sectionName`)}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    placeholder="tls"
+                  />
+                </div>
+                {parentRefFields.length > 1 && (
+                  <button type="button" onClick={() => removeParentRef(index)} className="mt-5 text-sm text-red-400 hover:underline">
+                    Remove
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Hostnames (only for TLS/gRPC routes) */}
+        {hasHostnames(routeType) && (
+          <div>
+            <label htmlFor="hostnames" className="block text-sm font-medium">Hostnames (optional, comma-separated)</label>
+            <input
+              id="hostnames"
+              {...register("hostnames")}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              placeholder="example.com, api.example.com"
+            />
+          </div>
+        )}
+
+        {/* Rules (backend refs only) */}
+        <div>
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-medium">Rules</label>
+            <button
+              type="button"
+              onClick={() => appendRule({ backendRefs: [{ name: "", port: 443, weight: 1, namespace: "" }] })}
+              className="text-sm text-blue-400 hover:underline"
+            >
+              + Add Rule
+            </button>
+          </div>
+
+          <div className="mt-2 space-y-4">
+            {ruleFields.map((ruleField, ruleIndex) => (
+              <SimpleRuleEditor
+                key={ruleField.id}
+                index={ruleIndex}
+                control={control}
+                register={register}
+                errors={errors}
+                canRemove={ruleFields.length > 1}
+                onRemove={() => removeRule(ruleIndex)}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Submit */}
+        <div className="flex gap-3">
+          <button
+            type="submit"
+            disabled={isSubmitting || mutation.isPending}
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {mutation.isPending ? "Creating..." : `Create ${label}`}
+          </button>
+          <Link
+            to="/routes"
+            className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/30"
+          >
+            Cancel
+          </Link>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function RuleEditor({
   index,
   control,
@@ -346,6 +633,98 @@ function RuleEditor({
                   {...register(`rules.${index}.backendRefs.${brIndex}.port`, { valueAsNumber: true })}
                   className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   placeholder="80"
+                />
+              </div>
+              <div className="w-20">
+                <label className="block text-xs text-muted-foreground">Weight</label>
+                <input
+                  type="number"
+                  {...register(`rules.${index}.backendRefs.${brIndex}.weight`, { valueAsNumber: true })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  placeholder="1"
+                />
+              </div>
+              {backendRefFields.length > 1 && (
+                <button type="button" onClick={() => removeBackendRef(brIndex)} className="mb-1 text-sm text-red-400 hover:underline">
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SimpleRuleEditor({
+  index,
+  control,
+  register,
+  errors,
+  canRemove,
+  onRemove,
+}: {
+  index: number;
+  control: any;
+  register: any;
+  errors: any;
+  canRemove: boolean;
+  onRemove: () => void;
+}) {
+  const { fields: backendRefFields, append: appendBackendRef, remove: removeBackendRef } = useFieldArray({
+    control,
+    name: `rules.${index}.backendRefs`,
+  });
+
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-muted-foreground">Rule {index + 1}</span>
+        {canRemove && (
+          <button type="button" onClick={onRemove} className="text-sm text-red-400 hover:underline">
+            Remove Rule
+          </button>
+        )}
+      </div>
+
+      {/* Backend Refs only */}
+      <div className="mt-3">
+        <div className="flex items-center justify-between">
+          <label className="block text-xs font-medium text-muted-foreground">Backend Services</label>
+          <button
+            type="button"
+            onClick={() => appendBackendRef({ name: "", port: 443, weight: 1, namespace: "" })}
+            className="text-xs text-blue-400 hover:underline"
+          >
+            + Add Backend
+          </button>
+        </div>
+        {errors.rules?.[index]?.backendRefs?.root && (
+          <p className="mt-1 text-xs text-red-400">{errors.rules[index].backendRefs.root.message}</p>
+        )}
+
+        <div className="mt-2 space-y-2">
+          {backendRefFields.map((brField, brIndex) => (
+            <div key={brField.id} className="flex items-end gap-2">
+              <div className="flex-1">
+                <label className="block text-xs text-muted-foreground">Service Name</label>
+                <input
+                  {...register(`rules.${index}.backendRefs.${brIndex}.name`)}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  placeholder="my-service"
+                />
+                {errors.rules?.[index]?.backendRefs?.[brIndex]?.name && (
+                  <p className="mt-1 text-xs text-red-400">{errors.rules[index].backendRefs[brIndex].name.message}</p>
+                )}
+              </div>
+              <div className="w-24">
+                <label className="block text-xs text-muted-foreground">Port</label>
+                <input
+                  type="number"
+                  {...register(`rules.${index}.backendRefs.${brIndex}.port`, { valueAsNumber: true })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  placeholder="443"
                 />
               </div>
               <div className="w-20">

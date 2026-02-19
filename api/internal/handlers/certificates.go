@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
 )
@@ -88,9 +90,73 @@ func (h *CertificateHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// CreateCertificateRequest is the request body for creating a TLS certificate.
+type CreateCertificateRequest struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Cert      string `json:"cert"` // PEM-encoded certificate
+	Key       string `json:"key"`  // PEM-encoded private key
+}
+
 // Create creates a new TLS secret (certificate).
 func (h *CertificateHandler) Create(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	var req CreateCertificateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.Name == "" || req.Namespace == "" || req.Cert == "" || req.Key == "" {
+		writeError(w, http.StatusBadRequest, "name, namespace, cert, and key are required")
+		return
+	}
+
+	// Validate PEM certificate
+	block, _ := pem.Decode([]byte(req.Cert))
+	if block == nil {
+		writeError(w, http.StatusBadRequest, "invalid PEM certificate data")
+		return
+	}
+	if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid certificate: %v", err))
+		return
+	}
+
+	// Validate PEM key
+	keyBlock, _ := pem.Decode([]byte(req.Key))
+	if keyBlock == nil {
+		writeError(w, http.StatusBadRequest, "invalid PEM key data")
+		return
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      req.Name,
+			Namespace: req.Namespace,
+		},
+		Type: corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			"tls.crt": []byte(req.Cert),
+			"tls.key": []byte(req.Key),
+		},
+	}
+
+	if err := k8s.CreateSecret(r.Context(), secret); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("creating TLS secret: %v", err))
+		return
+	}
+
+	resp, ok := parseTLSSecret(secret)
+	if !ok {
+		writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name, "namespace": req.Namespace, "status": "created"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // Delete removes a certificate (TLS secret).

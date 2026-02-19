@@ -38,7 +38,31 @@ func (h *InferenceMetricsHandler) Summary(w http.ResponseWriter, r *http.Request
 
 // ByPool returns inference metrics grouped by pool.
 func (h *InferenceMetricsHandler) ByPool(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+	pools, err := h.Provider.ListPools(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	result := make(map[string]InferenceMetricsSummaryResponse, len(pools))
+	for _, pool := range pools {
+		summary, err := h.Provider.GetMetricsSummary(r.Context(), pool.Name)
+		if err != nil {
+			continue // skip pools that fail to fetch metrics
+		}
+		result[pool.Name] = InferenceMetricsSummaryResponse{
+			AvgTTFT:            summary.AvgTTFT,
+			P95TTFT:            summary.P95TTFT,
+			P99TTFT:            summary.P99TTFT,
+			AvgTPS:             summary.AvgTPS,
+			TotalTokens:        summary.TotalTokens,
+			AvgQueueDepth:      summary.AvgQueueDepth,
+			AvgKVCachePct:      summary.AvgKVCachePct,
+			PrefixCacheHitRate: summary.PrefixCacheHitRate,
+			AvgGPUUtil:         summary.AvgGPUUtil,
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // PodMetrics returns per-pod inference metrics.

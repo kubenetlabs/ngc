@@ -212,7 +212,7 @@ func TestPolicyHandler_Delete_HappyPath(t *testing.T) {
 	}
 }
 
-func TestPolicyHandler_Conflicts_Returns501(t *testing.T) {
+func TestPolicyHandler_Conflicts_NoClusterContext(t *testing.T) {
 	handler := &PolicyHandler{}
 
 	r := chi.NewRouter()
@@ -222,7 +222,31 @@ func TestPolicyHandler_Conflicts_Returns501(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("expected status 501, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPolicyHandler_Conflicts_HappyPath(t *testing.T) {
+	p1 := newTestPolicy("rate-1", "default")
+	p2 := newTestPolicy("rate-2", "default")
+	dc := newFakePolicyDynamicClient(p1, p2)
+	handler := &PolicyHandler{}
+
+	r := chi.NewRouter()
+	r.Use(policyContextMiddleware(dc))
+	r.Get("/policies/{type}/conflicts", handler.Conflicts)
+
+	req := httptest.NewRequest(http.MethodGet, "/policies/ratelimit/conflicts", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var conflicts []PolicyConflict
+	if err := json.NewDecoder(w.Body).Decode(&conflicts); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
 	}
 }

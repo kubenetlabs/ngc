@@ -128,7 +128,7 @@ func TestInferenceMetricsHandler_TTFTHistogram_HappyPath(t *testing.T) {
 	}
 }
 
-func TestInferenceMetricsHandler_ByPool_Returns501(t *testing.T) {
+func TestInferenceMetricsHandler_ByPool_HappyPath(t *testing.T) {
 	handler := newInferenceMetricsHandler()
 
 	r := chi.NewRouter()
@@ -138,7 +138,16 @@ func TestInferenceMetricsHandler_ByPool_Returns501(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Fatalf("expected status 501, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]InferenceMetricsSummaryResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp) == 0 {
+		t.Fatal("expected at least one pool in by-pool response")
 	}
 }
