@@ -55,7 +55,7 @@ func New(cfg Config) *Server {
 	r.Use(MaxBodySize(1 << 20)) // 1MB max body size
 
 	hub := NewHub()
-	RegisterInferenceTopics(hub, cfg.MetricsProvider)
+	RegisterInferenceTopics(hub, cfg.MetricsProvider, cfg.ClusterManager)
 	hub.Start()
 
 	// Create and start the alert evaluator.
@@ -131,7 +131,11 @@ func (s *Server) registerRoutes() {
 	diag := &handlers.DiagnosticsHandler{}
 	inf := &handlers.InferenceHandler{Provider: s.Config.MetricsProvider}
 	infMet := &handlers.InferenceMetricsHandler{Provider: s.Config.MetricsProvider}
-	infDiag := &handlers.InferenceDiagHandler{CHClient: s.Config.CHClient}
+	var chProvider *ch.Provider
+	if s.Config.CHClient != nil {
+		chProvider = ch.NewProviderFromClient(s.Config.CHClient)
+	}
+	infDiag := &handlers.InferenceDiagHandler{CHClient: s.Config.CHClient, Provider: chProvider}
 	infStack := &handlers.InferenceStackHandler{MetricsProvider: s.Config.MetricsProvider}
 	gwBundle := &handlers.GatewayBundleHandler{}
 	coex := &handlers.CoexistenceHandler{}

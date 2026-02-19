@@ -9,16 +9,22 @@ import (
 	"sync"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
 	"github.com/kubenetlabs/ngc/api/internal/inference"
 )
 
 // RegisterInferenceTopics adds generators for inference WebSocket topics.
 // When a non-nil MetricsProvider is given, epp-decisions and gpu-metrics
-// are backed by real ClickHouse queries. scaling-events remains synthetic.
-func RegisterInferenceTopics(hub *Hub, provider inference.MetricsProvider) {
+// are backed by real ClickHouse queries. When a non-nil cluster.Provider
+// is given, scaling-events are sourced from real HPA status; otherwise
+// they fall back to synthetic data.
+func RegisterInferenceTopics(hub *Hub, provider inference.MetricsProvider, clusters cluster.Provider) {
 	registerEPPDecisions(hub, provider)
 	registerGPUMetrics(hub, provider)
-	registerScalingEvents(hub)
+	registerScalingEvents(hub, clusters)
 }
 
 // registerEPPDecisions streams the most recent EPP decision every 1s.
@@ -78,10 +84,112 @@ func registerGPUMetrics(hub *Hub, provider inference.MetricsProvider) {
 	})
 }
 
-// registerScalingEvents emits synthetic scaling events every 15s.
-// No backing ClickHouse table exists yet; this will be wired to real
-// KEDA/HPA events when that data pipeline is built.
-func registerScalingEvents(hub *Hub) {
+// hpaState tracks the last-seen replica counts for an HPA so we can detect changes.
+type hpaState struct {
+	currentReplicas int32
+	desiredReplicas int32
+}
+
+var hpaGVR = schema.GroupVersionResource{
+	Group:    "autoscaling",
+	Version:  "v2",
+	Resource: "horizontalpodautoscalers",
+}
+
+// registerScalingEvents polls HPAs every 10s and emits scaling events when
+// replica counts change. Falls back to synthetic events when clusters is nil.
+func registerScalingEvents(hub *Hub, clusters cluster.Provider) {
+	if clusters == nil {
+		registerSyntheticScalingEvents(hub)
+		return
+	}
+
+	var (
+		mu       sync.Mutex
+		previous = make(map[string]hpaState)
+	)
+
+	hub.AddGenerator("scaling-events", 10*time.Second, func() (json.RawMessage, error) {
+		kc, err := clusters.Default()
+		if err != nil {
+			slog.Debug("ws scaling-events: no default cluster", "error", err)
+			return nil, nil
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		list, err := kc.DynamicClient().Resource(hpaGVR).Namespace("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			slog.Debug("ws scaling-events: HPA list failed", "error", err)
+			return nil, nil
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		var events []map[string]any
+
+		for _, item := range list.Items {
+			name := item.GetNamespace() + "/" + item.GetName()
+
+			status, ok := item.Object["status"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			currentReplicas := int32(0)
+			desiredReplicas := int32(0)
+			if v, ok := status["currentReplicas"].(int64); ok {
+				currentReplicas = int32(v)
+			}
+			if v, ok := status["desiredReplicas"].(int64); ok {
+				desiredReplicas = int32(v)
+			}
+
+			prev, seen := previous[name]
+			previous[name] = hpaState{
+				currentReplicas: currentReplicas,
+				desiredReplicas: desiredReplicas,
+			}
+
+			if !seen {
+				continue // First observation — no delta to report.
+			}
+
+			if prev.currentReplicas == currentReplicas && prev.desiredReplicas == desiredReplicas {
+				continue // No change.
+			}
+
+			eventType := "scale-up"
+			if desiredReplicas < prev.desiredReplicas {
+				eventType = "scale-down"
+			} else if desiredReplicas == currentReplicas && prev.desiredReplicas != prev.currentReplicas {
+				eventType = "cooldown"
+			}
+
+			events = append(events, map[string]any{
+				"timestamp":    time.Now().UTC().Format(time.RFC3339),
+				"pool":         name,
+				"event":        eventType,
+				"fromReplicas": prev.currentReplicas,
+				"toReplicas":   desiredReplicas,
+				"trigger":      "hpa",
+				"source":       "live",
+			})
+		}
+
+		if len(events) == 0 {
+			return nil, nil
+		}
+
+		// Return the first event (or batch them if needed later).
+		return json.Marshal(events[0])
+	})
+}
+
+// registerSyntheticScalingEvents emits random scaling events for dev/demo mode.
+func registerSyntheticScalingEvents(hub *Hub) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var mu sync.Mutex
 
@@ -97,6 +205,7 @@ func registerScalingEvents(hub *Hub) {
 			"fromReplicas": 4 + rng.Intn(4),
 			"toReplicas":   4 + rng.Intn(4),
 			"trigger":      fmt.Sprintf("gpu_utilization > %d%%", 70+rng.Intn(20)),
+			"source":       "synthetic",
 		}
 		return json.Marshal(event)
 	})

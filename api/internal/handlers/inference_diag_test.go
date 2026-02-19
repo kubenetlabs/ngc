@@ -35,6 +35,9 @@ func TestInferenceDiagHandler_SlowInference_Defaults(t *testing.T) {
 	if resp.TimeRange != "1h" {
 		t.Errorf("expected timeRange 1h, got %s", resp.TimeRange)
 	}
+	if resp.Source != "synthetic" {
+		t.Errorf("expected source synthetic, got %s", resp.Source)
+	}
 	if len(resp.SlowRequests) != 8 {
 		t.Errorf("expected 8 slow requests, got %d", len(resp.SlowRequests))
 	}
@@ -109,6 +112,9 @@ func TestInferenceDiagHandler_Replay_HappyPath(t *testing.T) {
 	if resp.RequestID != "req-123" {
 		t.Errorf("expected requestId req-123, got %s", resp.RequestID)
 	}
+	if resp.Source != "synthetic" {
+		t.Errorf("expected source synthetic, got %s", resp.Source)
+	}
 	if len(resp.Steps) != 5 {
 		t.Errorf("expected 5 steps, got %d", len(resp.Steps))
 	}
@@ -166,6 +172,9 @@ func TestInferenceDiagHandler_Benchmark_HappyPath(t *testing.T) {
 
 	if resp.Pool != "test-pool" {
 		t.Errorf("expected pool test-pool, got %s", resp.Pool)
+	}
+	if resp.Source != "synthetic" {
+		t.Errorf("expected source synthetic, got %s", resp.Source)
 	}
 	if resp.TotalRequests <= 0 {
 		t.Errorf("expected positive totalRequests, got %d", resp.TotalRequests)

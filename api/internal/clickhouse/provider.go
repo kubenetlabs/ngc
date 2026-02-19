@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
 	"github.com/kubenetlabs/ngc/api/internal/inference"
@@ -19,15 +20,20 @@ var gpuPricing = map[string]float64{
 
 // Provider implements inference.MetricsProvider backed by ClickHouse.
 type Provider struct {
-	client *Client
+	conn Querier
 }
 
 // compile-time interface check
 var _ inference.MetricsProvider = (*Provider)(nil)
 
-// NewProvider creates a ClickHouse-backed metrics provider.
-func NewProvider(client *Client) *Provider {
-	return &Provider{client: client}
+// NewProvider creates a ClickHouse-backed metrics provider from a Querier.
+func NewProvider(q Querier) *Provider {
+	return &Provider{conn: q}
+}
+
+// NewProviderFromClient creates a Provider from a *Client for backward compatibility.
+func NewProviderFromClient(client *Client) *Provider {
+	return NewProvider(client.Conn())
 }
 
 // clusterFilter extracts the cluster name from context for ClickHouse filtering.
@@ -38,7 +44,7 @@ func clusterFilter(ctx context.Context) string {
 
 func (p *Provider) ListPools(ctx context.Context) ([]inference.PoolStatus, error) {
 	cn := clusterFilter(ctx)
-	rows, err := p.client.Conn().Query(ctx, queryListPools, cn, cn)
+	rows, err := p.conn.Query(ctx, queryListPools, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("ListPools query: %w", err)
 	}
@@ -65,7 +71,7 @@ func (p *Provider) ListPools(ctx context.Context) ([]inference.PoolStatus, error
 
 func (p *Provider) GetPool(ctx context.Context, name string) (*inference.PoolStatus, error) {
 	cn := clusterFilter(ctx)
-	rows, err := p.client.Conn().Query(ctx, queryGetPool, name, cn, cn)
+	rows, err := p.conn.Query(ctx, queryGetPool, name, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("GetPool query: %w", err)
 	}
@@ -93,7 +99,7 @@ func (p *Provider) GetPool(ctx context.Context, name string) (*inference.PoolSta
 func (p *Provider) UpsertPool(ctx context.Context, pool inference.PoolStatus) error {
 	cn := clusterFilter(ctx)
 	// ClickHouse ReplacingMergeTree will handle deduplication on (name, namespace).
-	err := p.client.Conn().Exec(ctx, queryUpsertPool,
+	err := p.conn.Exec(ctx, queryUpsertPool,
 		pool.Name, pool.Namespace, pool.ModelName, pool.ModelVersion,
 		pool.ServingBackend, pool.GPUType, pool.GPUCount,
 		pool.Replicas, pool.ReadyReplicas, pool.MinReplicas, pool.MaxReplicas,
@@ -106,7 +112,7 @@ func (p *Provider) UpsertPool(ctx context.Context, pool inference.PoolStatus) er
 }
 
 func (p *Provider) DeletePool(ctx context.Context, name, namespace string) error {
-	err := p.client.Conn().Exec(ctx, queryDeletePool, name, namespace)
+	err := p.conn.Exec(ctx, queryDeletePool, name, namespace)
 	if err != nil {
 		return fmt.Errorf("DeletePool: %w", err)
 	}
@@ -115,7 +121,7 @@ func (p *Provider) DeletePool(ctx context.Context, name, namespace string) error
 
 func (p *Provider) GetMetricsSummary(ctx context.Context, pool string) (*inference.MetricsSummary, error) {
 	cn := clusterFilter(ctx)
-	rows, err := p.client.Conn().Query(ctx, queryMetricsSummary, pool, pool, cn, cn)
+	rows, err := p.conn.Query(ctx, queryMetricsSummary, pool, pool, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("GetMetricsSummary query: %w", err)
 	}
@@ -142,7 +148,7 @@ func (p *Provider) GetMetricsSummary(ctx context.Context, pool string) (*inferen
 
 func (p *Provider) GetPodMetrics(ctx context.Context, pool string) ([]inference.PodMetrics, error) {
 	cn := clusterFilter(ctx)
-	rows, err := p.client.Conn().Query(ctx, queryPodMetrics, pool, pool, cn, cn)
+	rows, err := p.conn.Query(ctx, queryPodMetrics, pool, pool, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("GetPodMetrics query: %w", err)
 	}
@@ -169,7 +175,7 @@ func (p *Provider) GetPodMetrics(ctx context.Context, pool string) ([]inference.
 
 func (p *Provider) GetRecentEPPDecisions(ctx context.Context, pool string, limit int) ([]inference.EPPDecision, error) {
 	cn := clusterFilter(ctx)
-	rows, err := p.client.Conn().Query(ctx, queryRecentEPPDecisions, pool, pool, cn, cn, limit)
+	rows, err := p.conn.Query(ctx, queryRecentEPPDecisions, pool, pool, cn, cn, limit)
 	if err != nil {
 		return nil, fmt.Errorf("GetRecentEPPDecisions query: %w", err)
 	}
@@ -195,7 +201,7 @@ func (p *Provider) GetRecentEPPDecisions(ctx context.Context, pool string, limit
 
 func (p *Provider) GetTTFTHistogram(ctx context.Context, pool string) ([]inference.HistogramBucket, error) {
 	cn := clusterFilter(ctx)
-	rows, err := p.client.Conn().Query(ctx, queryTTFTHistogram, pool, cn, cn)
+	rows, err := p.conn.Query(ctx, queryTTFTHistogram, pool, cn, cn)
 	if err != nil {
 		return nil, fmt.Errorf("GetTTFTHistogram query: %w", err)
 	}
@@ -242,7 +248,7 @@ func (p *Provider) GetKVCacheSeries(ctx context.Context, pool string) ([]inferen
 
 // queryTimeseries is a helper for all timeseries queries that return (timestamp, value) rows.
 func (p *Provider) queryTimeseries(ctx context.Context, query, pool, clusterName, label string) ([]inference.TimeseriesPoint, error) {
-	rows, err := p.client.Conn().Query(ctx, query, pool, clusterName, clusterName)
+	rows, err := p.conn.Query(ctx, query, pool, clusterName, clusterName)
 	if err != nil {
 		return nil, fmt.Errorf("%s query: %w", label, err)
 	}
@@ -285,4 +291,73 @@ func (p *Provider) GetCostEstimate(ctx context.Context, pool string) (*inference
 		DailyCost:    totalHourly * 24,
 		MonthlyCost:  totalHourly * 24 * 30,
 	}, nil
+}
+
+// SlowRequestRow holds a single slow inference request from ClickHouse.
+type SlowRequestRow struct {
+	Timestamp   time.Time
+	PoolName    string
+	TTFTMs      float64
+	TPS         float64
+	TotalTokens uint64
+	QueueDepth  uint32
+	KVCachePct  float64
+	GPUUtilPct  float64
+}
+
+// CorrelationRow holds TTFT correlation values from ClickHouse.
+type CorrelationRow struct {
+	QueueDepth  float64
+	GPUUtil     float64
+	KVCache     float64
+	InputLength float64
+}
+
+// GetSlowRequests returns the top N requests with highest TTFT in a time window.
+func (p *Provider) GetSlowRequests(ctx context.Context, pool string, minutes, limit int) ([]SlowRequestRow, error) {
+	cn := clusterFilter(ctx)
+	rows, err := p.conn.Query(ctx, querySlowRequests, pool, pool, cn, cn, minutes, limit)
+	if err != nil {
+		return nil, fmt.Errorf("GetSlowRequests query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SlowRequestRow
+	for rows.Next() {
+		var r SlowRequestRow
+		if err := rows.Scan(
+			&r.Timestamp, &r.PoolName, &r.TTFTMs, &r.TPS,
+			&r.TotalTokens, &r.QueueDepth, &r.KVCachePct, &r.GPUUtilPct,
+		); err != nil {
+			return nil, fmt.Errorf("GetSlowRequests scan: %w", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("GetSlowRequests rows: %w", err)
+	}
+	return results, nil
+}
+
+// GetTTFTCorrelations computes Pearson correlations between TTFT and other metrics.
+func (p *Provider) GetTTFTCorrelations(ctx context.Context, pool string, minutes int) (*CorrelationRow, error) {
+	cn := clusterFilter(ctx)
+	rows, err := p.conn.Query(ctx, queryTTFTCorrelations, pool, pool, cn, cn, minutes)
+	if err != nil {
+		return nil, fmt.Errorf("GetTTFTCorrelations query: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("GetTTFTCorrelations rows: %w", err)
+		}
+		return nil, nil
+	}
+
+	var c CorrelationRow
+	if err := rows.Scan(&c.QueueDepth, &c.GPUUtil, &c.KVCache, &c.InputLength); err != nil {
+		return nil, fmt.Errorf("GetTTFTCorrelations scan: %w", err)
+	}
+	return &c, nil
 }

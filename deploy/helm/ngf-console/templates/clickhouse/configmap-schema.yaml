@@ -9,6 +9,11 @@ metadata:
     app.kubernetes.io/component: clickhouse
 data:
   init.sql: |
+    -- Drop materialized view first (depends on ngf_access_logs columns)
+    DROP TABLE IF EXISTS ngf_metrics_1m;
+    -- Recreate ngf_access_logs with correct schema (drops old PascalCase columns)
+    DROP TABLE IF EXISTS ngf_access_logs;
+
     CREATE TABLE IF NOT EXISTS ngf_access_logs (
         timestamp DateTime64(3),
         cluster_name LowCardinality(String) DEFAULT '',

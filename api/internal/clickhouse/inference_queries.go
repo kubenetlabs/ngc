@@ -150,3 +150,29 @@ WHERE pool_name = ?
 GROUP BY ts
 ORDER BY ts
 `
+
+// querySlowRequests fetches the top N requests with highest TTFT in a time window.
+const querySlowRequests = `
+SELECT
+    timestamp, pool_name, ttft_ms, tps, total_tokens,
+    queue_depth, kv_cache_pct, gpu_util_pct
+FROM ngf_inference_metrics_1m
+WHERE (? = '' OR pool_name = ?)
+  AND (? = '' OR cluster_name = ?)
+  AND timestamp >= now() - toIntervalMinute(?)
+ORDER BY ttft_ms DESC
+LIMIT ?
+`
+
+// queryTTFTCorrelations computes Pearson correlations between TTFT and other metrics.
+const queryTTFTCorrelations = `
+SELECT
+    corr(ttft_ms, queue_depth) AS corr_queue_depth,
+    corr(ttft_ms, gpu_util_pct) AS corr_gpu_util,
+    corr(ttft_ms, kv_cache_pct) AS corr_kv_cache,
+    corr(ttft_ms, total_tokens) AS corr_input_length
+FROM ngf_inference_metrics_1m
+WHERE (? = '' OR pool_name = ?)
+  AND (? = '' OR cluster_name = ?)
+  AND timestamp >= now() - toIntervalMinute(?)
+`

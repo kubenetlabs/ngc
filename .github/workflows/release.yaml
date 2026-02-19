@@ -22,10 +22,15 @@ jobs:
             context: frontend
           - component: api
             context: api
+          - component: operator
+            context: operator
           - component: controller
             context: controller
           - component: migration
             context: migration-cli
+          - component: agent
+            context: agent
+            dockerfile: Dockerfile.heartbeat
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +52,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/${{ matrix.dockerfile || 'Dockerfile' }}
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ matrix.component }}:${{ steps.version.outputs.VERSION }}

@@ -113,7 +113,7 @@ func main() {
 			slog.Error("failed to create clickhouse client (explicitly configured)", "error", err)
 			os.Exit(1)
 		}
-		metricsProvider = chprovider.NewProvider(chClient)
+		metricsProvider = chprovider.NewProviderFromClient(chClient)
 		slog.Info("using clickhouse metrics provider", "url", *clickhouseURL)
 	} else {
 		metricsProvider = inference.NewMockProvider()
