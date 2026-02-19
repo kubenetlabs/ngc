@@ -84,7 +84,7 @@ func TestDiagnosticsHandler_RouteCheck_UnsupportedRouteKind(t *testing.T) {
 	r.Use(contextMiddleware(k8sClient))
 	r.Post("/api/v1/diagnostics/route-check", handler.RouteCheck)
 
-	body := `{"namespace":"default","routeName":"my-route","routeKind":"GRPCRoute"}`
+	body := `{"namespace":"default","routeName":"my-route","routeKind":"UDPRoute"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/diagnostics/route-check", bytes.NewBufferString(body))
 	w := httptest.NewRecorder()
 

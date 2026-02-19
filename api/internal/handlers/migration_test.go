@@ -201,6 +201,14 @@ func TestMigrationHandler_Import_BadRequest(t *testing.T) {
 func TestMigrationHandler_Analysis_HappyPath(t *testing.T) {
 	handler := &MigrationHandler{}
 
+	// Pre-populate the imports map with test data matching the old mock behaviour.
+	handler.imports.Store("test-import-123", []DiscoveredResource{
+		{Kind: "Ingress", Name: "web-ingress", Namespace: "default", APIVersion: "networking.k8s.io/v1"},
+		{Kind: "Ingress", Name: "api-ingress", Namespace: "default", APIVersion: "networking.k8s.io/v1"},
+		{Kind: "VirtualServer", Name: "main-vs", Namespace: "default", APIVersion: "k8s.nginx.org/v1"},
+		{Kind: "TransportServer", Name: "tcp-ts", Namespace: "default", APIVersion: "k8s.nginx.org/v1alpha1"},
+	})
+
 	r := chi.NewRouter()
 	r.Post("/migration/analysis", handler.Analysis)
 

@@ -234,13 +234,6 @@ func (h *GatewayHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writeNotImplemented sends a 501 JSON response.
-func writeNotImplemented(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
-}
-
 // gatewayReqToBundle converts a CreateGatewayRequest to a CreateGatewayBundleRequest.
 func gatewayReqToBundle(req CreateGatewayRequest) CreateGatewayBundleRequest {
 	listeners := make([]GatewayBundleListenerReq, 0, len(req.Listeners))

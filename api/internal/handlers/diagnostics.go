@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
 )
 
 // DiagnosticsHandler handles diagnostic API requests.
@@ -86,8 +88,8 @@ func (h *DiagnosticsHandler) RouteCheck(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	checks := make([]DiagnosticCheck, 0, 6)
 
-	// Currently only HTTPRoute is supported for detailed checks.
-	if req.RouteKind != "HTTPRoute" {
+	// Only HTTPRoute and GRPCRoute are supported for detailed checks.
+	if req.RouteKind != "HTTPRoute" && req.RouteKind != "GRPCRoute" {
 		checks = append(checks, DiagnosticCheck{
 			Name:    "Route Exists",
 			Status:  "skip",
@@ -99,6 +101,12 @@ func (h *DiagnosticsHandler) RouteCheck(w http.ResponseWriter, r *http.Request) 
 			Status:    "unhealthy",
 			Checks:    checks,
 		})
+		return
+	}
+
+	// GRPCRoute diagnostic path
+	if req.RouteKind == "GRPCRoute" {
+		h.routeCheckGRPC(w, k8s, ctx, req, checks)
 		return
 	}
 
@@ -606,6 +614,238 @@ func collectBackendNames(route *gatewayv1.HTTPRoute) []string {
 // findRouteCondition looks through route status parents for a condition of the given type
 // and returns its status string. Returns empty string if not found.
 func findRouteCondition(route *gatewayv1.HTTPRoute, condType string) string {
+	for _, parent := range route.Status.Parents {
+		for _, cond := range parent.Conditions {
+			if cond.Type == condType {
+				return string(cond.Status)
+			}
+		}
+	}
+	return ""
+}
+
+// routeCheckGRPC runs the 6 diagnostic checks for a GRPCRoute.
+func (h *DiagnosticsHandler) routeCheckGRPC(w http.ResponseWriter, k8s *kubernetes.Client, ctx context.Context, req RouteCheckRequest, checks []DiagnosticCheck) {
+	// Check 1: Route Exists
+	route, err := k8s.GetGRPCRoute(ctx, req.Namespace, req.RouteName)
+	if err != nil {
+		checks = append(checks, DiagnosticCheck{
+			Name:    "Route Exists",
+			Status:  "fail",
+			Message: fmt.Sprintf("GRPCRoute %s/%s not found", req.Namespace, req.RouteName),
+			Details: err.Error(),
+		})
+		// All remaining checks are skip
+		for _, name := range []string{"Parent Gateway Attached", "Listener Match", "Backend Health", "Route Accepted", "Route Resolved"} {
+			checks = append(checks, DiagnosticCheck{
+				Name:    name,
+				Status:  "skip",
+				Message: "Skipped because route does not exist",
+			})
+		}
+		writeJSON(w, http.StatusOK, RouteCheckResponse{
+			Route:     req.RouteName,
+			Namespace: req.Namespace,
+			Status:    "unhealthy",
+			Checks:    checks,
+		})
+		return
+	}
+
+	checks = append(checks, DiagnosticCheck{
+		Name:    "Route Exists",
+		Status:  "pass",
+		Message: fmt.Sprintf("GRPCRoute %s/%s exists", req.Namespace, req.RouteName),
+	})
+
+	// Check 2: Parent Gateway Attached
+	parentGatewayCheck := DiagnosticCheck{
+		Name: "Parent Gateway Attached",
+	}
+	var parentGateway *gatewayv1.Gateway
+	if len(route.Spec.ParentRefs) == 0 {
+		parentGatewayCheck.Status = "fail"
+		parentGatewayCheck.Message = "No parentRefs defined on route"
+	} else {
+		allFound := true
+		var details []string
+		for _, ref := range route.Spec.ParentRefs {
+			gwName := string(ref.Name)
+			gwNamespace := req.Namespace
+			if ref.Namespace != nil {
+				gwNamespace = string(*ref.Namespace)
+			}
+			gw, gwErr := k8s.GetGateway(ctx, gwNamespace, gwName)
+			if gwErr != nil {
+				allFound = false
+				details = append(details, fmt.Sprintf("Gateway %s/%s not found: %v", gwNamespace, gwName, gwErr))
+			} else if parentGateway == nil {
+				parentGateway = gw
+			}
+		}
+		if allFound {
+			parentGatewayCheck.Status = "pass"
+			parentGatewayCheck.Message = fmt.Sprintf("All %d parent gateway(s) found", len(route.Spec.ParentRefs))
+		} else {
+			parentGatewayCheck.Status = "fail"
+			parentGatewayCheck.Message = "One or more parent gateways not found"
+			parentGatewayCheck.Details = strings.Join(details, "; ")
+		}
+	}
+	checks = append(checks, parentGatewayCheck)
+
+	// Check 3: Listener Match — gRPC runs over HTTP/2, so check for HTTP/HTTPS listeners
+	listenerCheck := DiagnosticCheck{
+		Name: "Listener Match",
+	}
+	if parentGateway == nil {
+		listenerCheck.Status = "skip"
+		listenerCheck.Message = "Skipped because no parent gateway was found"
+	} else {
+		matched := false
+		for _, listener := range parentGateway.Spec.Listeners {
+			// gRPC uses HTTP/2 so HTTP and HTTPS listeners are compatible
+			if listener.Protocol == gatewayv1.HTTPProtocolType || listener.Protocol == gatewayv1.HTTPSProtocolType {
+				// Check hostname overlap if both specify hostnames
+				if listener.Hostname != nil && len(route.Spec.Hostnames) > 0 {
+					for _, routeHostname := range route.Spec.Hostnames {
+						if hostnamesMatch(string(*listener.Hostname), string(routeHostname)) {
+							matched = true
+							break
+						}
+					}
+				} else {
+					// No hostname constraint or route has no hostnames — matches
+					matched = true
+				}
+			}
+			if matched {
+				break
+			}
+		}
+		if matched {
+			listenerCheck.Status = "pass"
+			listenerCheck.Message = "Gateway has a compatible listener for this route"
+		} else {
+			listenerCheck.Status = "warn"
+			listenerCheck.Message = "No gateway listener matches the route's protocol/hostname"
+			listenerCheck.Details = fmt.Sprintf("Gateway %s/%s has %d listener(s), route has %d hostname(s)",
+				parentGateway.Namespace, parentGateway.Name,
+				len(parentGateway.Spec.Listeners), len(route.Spec.Hostnames))
+		}
+	}
+	checks = append(checks, listenerCheck)
+
+	// Check 4: Backend Health
+	backendCheck := DiagnosticCheck{
+		Name: "Backend Health",
+	}
+	backendNames := collectGRPCBackendNames(route)
+	if len(backendNames) == 0 {
+		backendCheck.Status = "warn"
+		backendCheck.Message = "No backendRefs defined in route rules"
+	} else {
+		services, svcErr := k8s.ListServices(ctx, req.Namespace)
+		if svcErr != nil {
+			backendCheck.Status = "fail"
+			backendCheck.Message = "Failed to list services"
+			backendCheck.Details = svcErr.Error()
+		} else {
+			svcSet := make(map[string]bool, len(services))
+			for _, svc := range services {
+				svcSet[svc.Name] = true
+			}
+			var missing []string
+			for _, name := range backendNames {
+				if !svcSet[name] {
+					missing = append(missing, name)
+				}
+			}
+			if len(missing) == 0 {
+				backendCheck.Status = "pass"
+				backendCheck.Message = fmt.Sprintf("All %d backend service(s) found", len(backendNames))
+			} else {
+				backendCheck.Status = "fail"
+				backendCheck.Message = fmt.Sprintf("%d of %d backend service(s) missing", len(missing), len(backendNames))
+				backendCheck.Details = "Missing: " + strings.Join(missing, ", ")
+			}
+		}
+	}
+	checks = append(checks, backendCheck)
+
+	// Check 5: Route Accepted
+	acceptedCheck := DiagnosticCheck{
+		Name: "Route Accepted",
+	}
+	acceptedStatus := findGRPCRouteCondition(route, "Accepted")
+	if acceptedStatus == "" {
+		acceptedCheck.Status = "warn"
+		acceptedCheck.Message = "No Accepted condition found in route status"
+	} else if acceptedStatus == string(metav1.ConditionTrue) {
+		acceptedCheck.Status = "pass"
+		acceptedCheck.Message = "Route has Accepted=True condition"
+	} else {
+		acceptedCheck.Status = "fail"
+		acceptedCheck.Message = fmt.Sprintf("Route Accepted condition is %s", acceptedStatus)
+	}
+	checks = append(checks, acceptedCheck)
+
+	// Check 6: Route Resolved
+	resolvedCheck := DiagnosticCheck{
+		Name: "Route Resolved",
+	}
+	resolvedStatus := findGRPCRouteCondition(route, "ResolvedRefs")
+	if resolvedStatus == "" {
+		resolvedCheck.Status = "warn"
+		resolvedCheck.Message = "No ResolvedRefs condition found in route status"
+	} else if resolvedStatus == string(metav1.ConditionTrue) {
+		resolvedCheck.Status = "pass"
+		resolvedCheck.Message = "Route has ResolvedRefs=True condition"
+	} else {
+		resolvedCheck.Status = "fail"
+		resolvedCheck.Message = fmt.Sprintf("Route ResolvedRefs condition is %s", resolvedStatus)
+	}
+	checks = append(checks, resolvedCheck)
+
+	// Determine overall status
+	overallStatus := "healthy"
+	for _, c := range checks {
+		if c.Status == "fail" {
+			overallStatus = "unhealthy"
+			break
+		}
+		if c.Status == "warn" {
+			overallStatus = "degraded"
+		}
+	}
+
+	writeJSON(w, http.StatusOK, RouteCheckResponse{
+		Route:     req.RouteName,
+		Namespace: req.Namespace,
+		Status:    overallStatus,
+		Checks:    checks,
+	})
+}
+
+// collectGRPCBackendNames extracts unique backend service names from all GRPCRoute rules.
+func collectGRPCBackendNames(route *gatewayv1.GRPCRoute) []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, rule := range route.Spec.Rules {
+		for _, br := range rule.BackendRefs {
+			name := string(br.Name)
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+	return names
+}
+
+// findGRPCRouteCondition looks through GRPCRoute status parents for a condition of the given type
+// and returns its status string. Returns empty string if not found.
+func findGRPCRouteCondition(route *gatewayv1.GRPCRoute, condType string) string {
 	for _, parent := range route.Status.Parents {
 		for _, cond := range parent.Conditions {
 			if cond.Type == condType {

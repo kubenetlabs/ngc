@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -143,7 +144,7 @@ func (h *InferenceHandler) CreatePool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert pool metadata into ClickHouse so it appears in the pool list.
-	_ = h.Provider.UpsertPool(r.Context(), inference.PoolStatus{
+	if err := h.Provider.UpsertPool(r.Context(), inference.PoolStatus{
 		Name:           req.Name,
 		Namespace:      req.Namespace,
 		ModelName:      req.ModelName,
@@ -157,7 +158,9 @@ func (h *InferenceHandler) CreatePool(w http.ResponseWriter, r *http.Request) {
 		MaxReplicas:    uint32(req.MaxReplicas),
 		Status:         "Pending",
 		CreatedAt:      time.Now(),
-	})
+	}); err != nil {
+		slog.Warn("failed to upsert pool in metrics provider", "pool", req.Name, "error", err)
+	}
 
 	writeJSON(w, http.StatusCreated, toInferenceStackResponse(created))
 }
@@ -286,7 +289,9 @@ func (h *InferenceHandler) DeletePool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove pool metadata from ClickHouse.
-	_ = h.Provider.DeletePool(r.Context(), name, ns)
+	if err := h.Provider.DeletePool(r.Context(), name, ns); err != nil {
+		slog.Warn("failed to delete pool from metrics provider", "pool", name, "namespace", ns, "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "inference pool deleted", "name": name, "namespace": ns})
 }

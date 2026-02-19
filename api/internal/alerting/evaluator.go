@@ -2,6 +2,7 @@ package alerting
 
 import (
 	"context"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"math"
@@ -9,12 +10,14 @@ import (
 	"time"
 
 	"github.com/kubenetlabs/ngc/api/internal/database"
+	prom "github.com/kubenetlabs/ngc/api/internal/prometheus"
 )
 
 // Evaluator periodically evaluates alert rules against metric values
 // and sends webhook notifications when alert state changes.
 type Evaluator struct {
 	store    database.Store
+	prom     *prom.Client
 	interval time.Duration
 	mu       sync.Mutex
 	firing   map[string]*FiringAlert // ruleID -> alert
@@ -41,11 +44,12 @@ type WebhookConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// New creates a new Evaluator with the given store and webhook configs.
+// New creates a new Evaluator with the given store, Prometheus client, and webhook configs.
 // The evaluation interval is fixed at 60 seconds.
-func New(store database.Store, webhooks []WebhookConfig) *Evaluator {
+func New(store database.Store, promClient *prom.Client, webhooks []WebhookConfig) *Evaluator {
 	return &Evaluator{
 		store:    store,
+		prom:     promClient,
 		interval: 60 * time.Second,
 		firing:   make(map[string]*FiringAlert),
 		webhooks: webhooks,
@@ -191,15 +195,57 @@ func (e *Evaluator) evaluate(ctx context.Context) {
 	}
 }
 
-// evaluateRule generates a synthetic metric value for the given rule and
-// returns the current value along with whether the threshold is exceeded.
-//
-// Since we do not have access to real Prometheus metrics in this component,
-// we use a deterministic approach based on the rule's metric name to produce
-// consistent mock values. The values incorporate time-based variation so
-// they change across evaluation cycles but remain reproducible.
+// metricToPromQL maps an alert rule's metric name and resource to a PromQL query string.
+// Returns an empty string for unknown metrics.
+func metricToPromQL(metric, resource string) string {
+	switch metric {
+	case "error_rate":
+		return fmt.Sprintf(`sum(rate(nginx_gateway_fabric_http_requests_total{status=~"5..",httproute_name="%s"}[5m])) / sum(rate(nginx_gateway_fabric_http_requests_total{httproute_name="%s"}[5m]))`, resource, resource)
+	case "latency_p99":
+		return fmt.Sprintf(`histogram_quantile(0.99, sum(rate(nginx_gateway_fabric_http_request_duration_seconds_bucket{httproute_name="%s"}[5m])) by (le)) * 1000`, resource)
+	case "request_rate":
+		return fmt.Sprintf(`sum(rate(nginx_gateway_fabric_http_requests_total{httproute_name="%s"}[5m]))`, resource)
+	case "gpu_util":
+		return fmt.Sprintf(`avg(gpu_utilization{pool="%s"})`, resource)
+	case "queue_depth":
+		return fmt.Sprintf(`avg(queue_depth{pool="%s"})`, resource)
+	case "kv_cache_util":
+		return fmt.Sprintf(`avg(kv_cache_utilization{pool="%s"})`, resource)
+	case "memory_usage":
+		return fmt.Sprintf(`avg(container_memory_usage_bytes{pod=~"%s.*"}) / avg(container_spec_memory_limit_bytes{pod=~"%s.*"}) * 100`, resource, resource)
+	default:
+		return ""
+	}
+}
+
+// evaluateRule queries Prometheus for the metric value defined by the rule.
+// If Prometheus is unavailable or the query fails, it falls back to synthetic
+// values for graceful degradation.
 func (e *Evaluator) evaluateRule(rule database.AlertRule) (float64, bool) {
-	value := syntheticMetricValue(rule.Metric, rule.Resource)
+	var value float64
+
+	// Try Prometheus first.
+	if e.prom != nil {
+		query := metricToPromQL(rule.Metric, rule.Resource)
+		if query != "" {
+			v, err := e.prom.QueryScalar(context.Background(), query, time.Now())
+			if err == nil {
+				value = v
+				slog.Debug("alert evaluator: using prometheus value",
+					"rule_id", rule.ID, "metric", rule.Metric, "value", value)
+			} else {
+				slog.Debug("alert evaluator: prometheus query failed, falling back to synthetic",
+					"rule_id", rule.ID, "metric", rule.Metric, "error", err)
+				value = syntheticMetricValue(rule.Metric, rule.Resource)
+			}
+		} else {
+			slog.Debug("alert evaluator: no promql mapping, using synthetic",
+				"rule_id", rule.ID, "metric", rule.Metric)
+			value = syntheticMetricValue(rule.Metric, rule.Resource)
+		}
+	} else {
+		value = syntheticMetricValue(rule.Metric, rule.Resource)
+	}
 
 	var exceeded bool
 	switch rule.Operator {
@@ -208,7 +254,6 @@ func (e *Evaluator) evaluateRule(rule database.AlertRule) (float64, bool) {
 	case "lt":
 		exceeded = value < rule.Threshold
 	case "eq":
-		// Use a small epsilon for floating point comparison.
 		exceeded = math.Abs(value-rule.Threshold) < 0.001
 	default:
 		slog.Warn("alert evaluator: unknown operator", "operator", rule.Operator, "rule_id", rule.ID)

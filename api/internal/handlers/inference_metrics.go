@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -48,7 +49,8 @@ func (h *InferenceMetricsHandler) ByPool(w http.ResponseWriter, r *http.Request)
 	for _, pool := range pools {
 		summary, err := h.Provider.GetMetricsSummary(r.Context(), pool.Name)
 		if err != nil {
-			continue // skip pools that fail to fetch metrics
+			slog.Warn("failed to get pool metrics", "pool", pool.Name, "error", err)
+			continue
 		}
 		result[pool.Name] = InferenceMetricsSummaryResponse{
 			AvgTTFT:            summary.AvgTTFT,

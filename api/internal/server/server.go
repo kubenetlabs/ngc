@@ -58,7 +58,7 @@ func New(cfg Config) *Server {
 	hub.Start()
 
 	// Create and start the alert evaluator.
-	eval := alerting.New(cfg.Store, cfg.Webhooks)
+	eval := alerting.New(cfg.Store, cfg.PromClient, cfg.Webhooks)
 	eval.Start(context.Background())
 
 	s := &Server{Router: r, Config: cfg, Hub: hub, Evaluator: eval}
@@ -121,7 +121,7 @@ func (s *Server) registerRoutes() {
 	diag := &handlers.DiagnosticsHandler{}
 	inf := &handlers.InferenceHandler{Provider: s.Config.MetricsProvider}
 	infMet := &handlers.InferenceMetricsHandler{Provider: s.Config.MetricsProvider}
-	infDiag := &handlers.InferenceDiagHandler{}
+	infDiag := &handlers.InferenceDiagHandler{CHClient: s.Config.CHClient}
 	infStack := &handlers.InferenceStackHandler{MetricsProvider: s.Config.MetricsProvider}
 	gwBundle := &handlers.GatewayBundleHandler{}
 	coex := &handlers.CoexistenceHandler{}

@@ -7,10 +7,14 @@ import (
 	"math/rand"
 	"net/http"
 	"time"
+
+	ch "github.com/kubenetlabs/ngc/api/internal/clickhouse"
 )
 
 // InferenceDiagHandler handles inference diagnostics endpoints.
-type InferenceDiagHandler struct{}
+type InferenceDiagHandler struct {
+	CHClient *ch.Client
+}
 
 // SlowInferenceResponse is the response for the slow inference diagnostics endpoint.
 type SlowInferenceResponse struct {

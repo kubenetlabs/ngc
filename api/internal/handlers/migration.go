@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,7 +19,9 @@ import (
 )
 
 // MigrationHandler handles NGINX config migration API requests.
-type MigrationHandler struct{}
+type MigrationHandler struct {
+	imports sync.Map // importID → []DiscoveredResource
+}
 
 // --- Request / Response types ---
 
@@ -151,6 +154,7 @@ func (h *MigrationHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 	id := generateID()
 	resources := discoverResources(req.Content, req.Format)
+	h.imports.Store(id, resources)
 
 	writeJSON(w, http.StatusOK, ImportResponse{
 		ID:            id,
@@ -351,48 +355,18 @@ func (h *MigrationHandler) Analysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build mock analysis items representing a realistic migration scenario.
-	items := []AnalysisItem{
-		{
-			Source: DiscoveredResource{
-				Kind: "Ingress", Name: "web-ingress", Namespace: "default",
-				APIVersion: "networking.k8s.io/v1",
-			},
-			Target:     "HTTPRoute",
-			Confidence: "high",
-			Issues:     []string{},
-			Notes:      []string{"Direct mapping available for path-based routing rules"},
-		},
-		{
-			Source: DiscoveredResource{
-				Kind: "Ingress", Name: "api-ingress", Namespace: "default",
-				APIVersion: "networking.k8s.io/v1",
-			},
-			Target:     "HTTPRoute",
-			Confidence: "high",
-			Issues:     []string{},
-			Notes:      []string{"TLS termination will be moved to Gateway listener"},
-		},
-		{
-			Source: DiscoveredResource{
-				Kind: "VirtualServer", Name: "app-vs", Namespace: "default",
-				APIVersion: "k8s.nginx.org/v1",
-			},
-			Target:     "HTTPRoute",
-			Confidence: "medium",
-			Issues:     []string{"Rate limiting annotations require policy attachment"},
-			Notes:      []string{"Most routing rules map to HTTPRoute matches"},
-		},
-		{
-			Source: DiscoveredResource{
-				Kind: "TransportServer", Name: "tcp-ts", Namespace: "default",
-				APIVersion: "k8s.nginx.org/v1alpha1",
-			},
-			Target:     "TCPRoute",
-			Confidence: "low",
-			Issues:     []string{"TCPRoute support varies by implementation", "Session persistence not directly supported"},
-			Notes:      []string{"Manual review recommended"},
-		},
+	// Look up the imported resources.
+	val, ok := h.imports.Load(req.ImportID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "import not found — please re-import")
+		return
+	}
+	resources := val.([]DiscoveredResource)
+
+	// Analyze each discovered resource.
+	items := make([]AnalysisItem, 0, len(resources))
+	for _, res := range resources {
+		items = append(items, analyzeResource(res))
 	}
 
 	convertible := 0
@@ -424,6 +398,68 @@ func (h *MigrationHandler) Analysis(w http.ResponseWriter, r *http.Request) {
 		Unsupported:    unsupported,
 		Items:          items,
 	})
+}
+
+// analyzeResource produces a migration analysis item for a single discovered resource.
+func analyzeResource(res DiscoveredResource) AnalysisItem {
+	switch res.Kind {
+	case "Ingress":
+		return AnalysisItem{
+			Source:     res,
+			Target:     "HTTPRoute",
+			Confidence: "high",
+			Issues:     []string{},
+			Notes:      []string{"Direct mapping available for path-based routing rules", "TLS termination will be moved to Gateway listener"},
+		}
+	case "VirtualServer":
+		return AnalysisItem{
+			Source:     res,
+			Target:     "HTTPRoute",
+			Confidence: "medium",
+			Issues:     []string{"Rate limiting annotations require policy attachment", "Custom NGINX snippets need manual review"},
+			Notes:      []string{"Most routing rules map to HTTPRoute matches"},
+		}
+	case "VirtualServerRoute":
+		return AnalysisItem{
+			Source:     res,
+			Target:     "HTTPRoute",
+			Confidence: "medium",
+			Issues:     []string{"Sub-route merging may require manual adjustment"},
+			Notes:      []string{"VirtualServerRoute rules will be merged into parent HTTPRoute"},
+		}
+	case "TransportServer":
+		return AnalysisItem{
+			Source:     res,
+			Target:     "TCPRoute",
+			Confidence: "low",
+			Issues:     []string{"TCPRoute support varies by implementation", "Session persistence not directly supported"},
+			Notes:      []string{"Manual review recommended"},
+		}
+	case "Gateway":
+		return AnalysisItem{
+			Source:     res,
+			Target:     "Gateway",
+			Confidence: "high",
+			Issues:     []string{},
+			Notes:      []string{"Direct Gateway API mapping, listener configuration preserved"},
+		}
+	case "HTTPRoute":
+		return AnalysisItem{
+			Source:     res,
+			Target:     "HTTPRoute",
+			Confidence: "high",
+			Issues:     []string{},
+			Notes:      []string{"Already Gateway API native — no conversion needed"},
+		}
+	default:
+		return AnalysisItem{
+			Source:     res,
+			Target:     "Unknown",
+			Confidence: "low",
+			Issues:     []string{fmt.Sprintf("Resource kind %q has no known Gateway API equivalent", res.Kind)},
+			Notes:      []string{"Manual migration required"},
+		}
+	}
 }
 
 // Generate produces Gateway API resources from the analyzed configuration.
