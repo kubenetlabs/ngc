@@ -103,6 +103,18 @@ GROUP BY ts
 ORDER BY ts
 `
 
+const queryActiveRequestsSeries = `
+SELECT
+    toStartOfMinute(timestamp) AS ts,
+    avg(requests_in_flight) AS value
+FROM ngf_inference_metrics_1m
+WHERE pool_name = ?
+  AND (? = '' OR cluster_name = ?)
+  AND timestamp >= now() - INTERVAL 60 MINUTE
+GROUP BY ts
+ORDER BY ts
+`
+
 const queryGPUUtilSeries = `
 SELECT
     toStartOfMinute(timestamp) AS ts,

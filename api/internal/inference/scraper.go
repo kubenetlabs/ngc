@@ -31,8 +31,8 @@ const vllmMetricsPort = 8000
 // ClickHouse insert queries for scraper-produced data.
 const insertMetrics1m = `INSERT INTO ngf_inference_metrics_1m (
 	timestamp, cluster_name, pool_name, ttft_ms, tps, total_tokens,
-	queue_depth, kv_cache_pct, prefix_cache_hit, gpu_util_pct
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	queue_depth, requests_in_flight, kv_cache_pct, prefix_cache_hit, gpu_util_pct
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 const insertPodMetrics = `INSERT INTO ngf_pod_metrics (
 	timestamp, cluster_name, pool_name, pod_name, node_name, gpu_id, gpu_type,
@@ -172,13 +172,14 @@ func (s *metricsScraper) scrapePoolInCluster(ctx context.Context, cc *mc.Cluster
 
 	now := time.Now().UTC()
 	var (
-		totalTTFT    float64
-		totalTPS     float64
-		totalTokens  uint64
-		totalQueue   float64
-		totalKV      float64
-		totalGPUUtil float64
-		podCount     int
+		totalTTFT     float64
+		totalTPS      float64
+		totalTokens   uint64
+		totalQueue    float64
+		totalInFlight float64
+		totalKV       float64
+		totalGPUUtil  float64
+		podCount      int
 	)
 
 	for i := range podList.Items {
@@ -219,6 +220,7 @@ func (s *metricsScraper) scrapePoolInCluster(ctx context.Context, cc *mc.Cluster
 		totalTPS += podTPS
 		totalTokens += tokensDelta
 		totalQueue += float64(pm.queueDepth)
+		totalInFlight += float64(pm.requestsInFlight)
 		totalKV += pm.kvCachePct
 		totalGPUUtil += pm.gpuUtilPct
 
@@ -245,6 +247,7 @@ func (s *metricsScraper) scrapePoolInCluster(ctx context.Context, cc *mc.Cluster
 		roundTo(totalTPS/n, 2),
 		totalTokens,
 		uint32(math.Round(totalQueue/n)),
+		uint32(math.Round(totalInFlight/n)),
 		roundTo(totalKV/n, 2),
 		uint8(0),
 		roundTo(totalGPUUtil/n, 2),

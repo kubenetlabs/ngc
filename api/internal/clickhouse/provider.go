@@ -225,6 +225,11 @@ func (p *Provider) GetQueueDepthSeries(ctx context.Context, pool string) ([]infe
 	return p.queryTimeseries(ctx, queryQueueDepthSeries, pool, cn, "GetQueueDepthSeries")
 }
 
+func (p *Provider) GetActiveRequestsSeries(ctx context.Context, pool string) ([]inference.TimeseriesPoint, error) {
+	cn := clusterFilter(ctx)
+	return p.queryTimeseries(ctx, queryActiveRequestsSeries, pool, cn, "GetActiveRequestsSeries")
+}
+
 func (p *Provider) GetGPUUtilSeries(ctx context.Context, pool string) ([]inference.TimeseriesPoint, error) {
 	cn := clusterFilter(ctx)
 	return p.queryTimeseries(ctx, queryGPUUtilSeries, pool, cn, "GetGPUUtilSeries")

@@ -218,6 +218,10 @@ func (m *MockProvider) GetQueueDepthSeries(_ context.Context, _ string) ([]Times
 	return m.generateTimeseries(60, 5, 4), nil
 }
 
+func (m *MockProvider) GetActiveRequestsSeries(_ context.Context, _ string) ([]TimeseriesPoint, error) {
+	return m.generateTimeseries(60, 12, 8), nil
+}
+
 func (m *MockProvider) GetGPUUtilSeries(_ context.Context, _ string) ([]TimeseriesPoint, error) {
 	return m.generateTimeseries(60, 72, 15), nil
 }

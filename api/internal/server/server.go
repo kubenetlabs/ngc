@@ -359,6 +359,7 @@ func (s *Server) mountResourceRoutes(
 			r.Get("/ttft-histogram/{pool}", infMet.TTFTHistogram)
 			r.Get("/tps-throughput/{pool}", infMet.TPSThroughput)
 			r.Get("/queue-depth/{pool}", infMet.QueueDepthSeries)
+			r.Get("/active-requests/{pool}", infMet.ActiveRequestsSeries)
 			r.Get("/gpu-util/{pool}", infMet.GPUUtilSeries)
 			r.Get("/kv-cache/{pool}", infMet.KVCacheSeries)
 		})

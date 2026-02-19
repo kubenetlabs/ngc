@@ -8,6 +8,7 @@ import {
   fetchTTFTHistogram,
   fetchTPSThroughput,
   fetchQueueDepthSeries,
+  fetchActiveRequestsSeries,
   fetchGPUUtilSeries,
   fetchKVCacheSeries,
   fetchCostEstimate,
@@ -65,6 +66,13 @@ export default function InferencePoolDetail() {
   const { data: queueData } = useQuery({
     queryKey: ["queue-depth", activeCluster, poolName],
     queryFn: () => fetchQueueDepthSeries(poolName),
+    enabled: !!poolName && activeTab === "metrics",
+    refetchInterval: 15000,
+  });
+
+  const { data: activeReqData } = useQuery({
+    queryKey: ["active-requests-series", activeCluster, poolName],
+    queryFn: () => fetchActiveRequestsSeries(poolName),
     enabled: !!poolName && activeTab === "metrics",
     refetchInterval: 15000,
   });
@@ -177,14 +185,17 @@ export default function InferencePoolDetail() {
             {ttftData && <TTFTHistogram data={ttftData} />}
             <div className="grid gap-6 lg:grid-cols-2">
               {tpsData && <TimeseriesChart title="Tokens per Second" data={tpsData} unit=" tok/s" color="#3b82f6" />}
-              {queueData && (
-                <TimeseriesChart title="Queue Depth" data={queueData} unit="" color="#f59e0b" variant="area" />
+              {activeReqData && (
+                <TimeseriesChart title="Active Requests" data={activeReqData} unit="" color="#f59e0b" variant="area" />
               )}
               {gpuUtilData && (
                 <TimeseriesChart title="GPU Utilization" data={gpuUtilData} unit="%" color="#10b981" variant="area" />
               )}
               {kvCacheData && (
                 <TimeseriesChart title="KV Cache Utilization" data={kvCacheData} unit="%" color="#8b5cf6" variant="area" />
+              )}
+              {queueData && (
+                <TimeseriesChart title="Queue Depth (Waiting)" data={queueData} unit="" color="#ef4444" variant="area" />
               )}
             </div>
           </div>

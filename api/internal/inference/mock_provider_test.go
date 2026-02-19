@@ -120,6 +120,7 @@ func TestTimeseries(t *testing.T) {
 	}{
 		{"TPSThroughput", p.GetTPSThroughput},
 		{"QueueDepthSeries", p.GetQueueDepthSeries},
+		{"ActiveRequestsSeries", p.GetActiveRequestsSeries},
 		{"GPUUtilSeries", p.GetGPUUtilSeries},
 		{"KVCacheSeries", p.GetKVCacheSeries},
 	} {

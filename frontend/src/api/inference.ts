@@ -56,6 +56,11 @@ export async function fetchQueueDepthSeries(pool: string): Promise<TimeseriesPoi
   return data;
 }
 
+export async function fetchActiveRequestsSeries(pool: string): Promise<TimeseriesPoint[]> {
+  const { data } = await apiClient.get<TimeseriesPoint[]>(`/inference/metrics/active-requests/${pool}`);
+  return data;
+}
+
 export async function fetchGPUUtilSeries(pool: string): Promise<TimeseriesPoint[]> {
   const { data } = await apiClient.get<TimeseriesPoint[]>(`/inference/metrics/gpu-util/${pool}`);
   return data;

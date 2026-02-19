@@ -130,6 +130,7 @@ data:
         tps Float64,
         total_tokens UInt64,
         queue_depth UInt32,
+        requests_in_flight UInt32,
         kv_cache_pct Float64,
         prefix_cache_hit UInt8,
         gpu_util_pct Float64

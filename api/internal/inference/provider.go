@@ -16,6 +16,7 @@ type MetricsProvider interface {
 	GetTTFTHistogram(ctx context.Context, pool string) ([]HistogramBucket, error)
 	GetTPSThroughput(ctx context.Context, pool string) ([]TimeseriesPoint, error)
 	GetQueueDepthSeries(ctx context.Context, pool string) ([]TimeseriesPoint, error)
+	GetActiveRequestsSeries(ctx context.Context, pool string) ([]TimeseriesPoint, error)
 	GetGPUUtilSeries(ctx context.Context, pool string) ([]TimeseriesPoint, error)
 	GetKVCacheSeries(ctx context.Context, pool string) ([]TimeseriesPoint, error)
 	GetCostEstimate(ctx context.Context, pool string) (*CostEstimate, error)

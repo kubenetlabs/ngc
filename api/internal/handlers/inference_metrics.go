@@ -160,6 +160,12 @@ func (h *InferenceMetricsHandler) QueueDepthSeries(w http.ResponseWriter, r *htt
 	h.writeTimeseries(w, r, pool, h.Provider.GetQueueDepthSeries)
 }
 
+// ActiveRequestsSeries returns active in-flight requests timeseries for a pool.
+func (h *InferenceMetricsHandler) ActiveRequestsSeries(w http.ResponseWriter, r *http.Request) {
+	pool := chi.URLParam(r, "pool")
+	h.writeTimeseries(w, r, pool, h.Provider.GetActiveRequestsSeries)
+}
+
 // GPUUtilSeries returns GPU utilization timeseries for a pool.
 func (h *InferenceMetricsHandler) GPUUtilSeries(w http.ResponseWriter, r *http.Request) {
 	pool := chi.URLParam(r, "pool")
