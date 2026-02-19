@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { fetchPolicies, deletePolicy } from "@/api/policies";
+import { ErrorState } from "@/components/common/ErrorState";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
 import type { PolicyType } from "@/types/policy";
 
@@ -37,7 +39,7 @@ export default function PolicyList() {
       await deletePolicy(policyType, name, namespace);
       refetch();
     } catch (err) {
-      alert(`Failed to delete policy: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to delete policy: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -73,7 +75,7 @@ export default function PolicyList() {
       </div>
 
       {isLoading && <p className="mt-6 text-muted-foreground">Loading policies...</p>}
-      {error && <p className="mt-6 text-red-400">Failed to load policies: {String(error)}</p>}
+      {error && <ErrorState error={error as Error} onRetry={() => refetch()} message="Failed to load policies" />}
 
       {policies && policies.length === 0 && (
         <p className="mt-6 text-muted-foreground">No {policyType} policies found.</p>

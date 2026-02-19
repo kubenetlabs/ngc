@@ -7,6 +7,7 @@ import { fetchTLSRoutes } from "@/api/tlsroutes";
 import { fetchTCPRoutes } from "@/api/tcproutes";
 import { fetchUDPRoutes } from "@/api/udproutes";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { ErrorState } from "@/components/common/ErrorState";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
 import { ALL_CLUSTERS } from "@/store/clusterStore";
 import { GlobalRouteList } from "@/components/global/GlobalRouteList";
@@ -52,7 +53,7 @@ function SingleClusterRouteList() {
   const activeCluster = useActiveCluster();
   const [routeType, setRouteType] = useState<RouteType>("HTTPRoute");
 
-  const { data: routes, isLoading, error } = useFetchRoutes(routeType, nsFilter || undefined, activeCluster);
+  const { data: routes, isLoading, error, refetch } = useFetchRoutes(routeType, nsFilter || undefined, activeCluster);
 
   return (
     <div>
@@ -100,7 +101,7 @@ function SingleClusterRouteList() {
       </div>
 
       {isLoading && <p className="mt-6 text-muted-foreground">Loading routes...</p>}
-      {error && <p className="mt-6 text-red-400">Failed to load routes: {String(error)}</p>}
+      {error && <ErrorState error={error as Error} onRetry={() => refetch()} message="Failed to load routes" />}
 
       {routes && routes.length === 0 && (
         <p className="mt-6 text-muted-foreground">No {routeType}s found.</p>

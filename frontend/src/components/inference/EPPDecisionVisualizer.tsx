@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PodCard } from "./PodCard";
 import { fetchPodMetrics, fetchEPPDecisions } from "@/api/inference";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import type { EPPDecision } from "@/types/inference";
 
 interface EPPDecisionVisualizerProps {
@@ -13,9 +14,6 @@ export function EPPDecisionVisualizer({ pool }: EPPDecisionVisualizerProps) {
   const activeCluster = useActiveCluster();
   const [highlightedPod, setHighlightedPod] = useState<string | null>(null);
   const [wsDecisions, setWsDecisions] = useState<EPPDecision[]>([]);
-  const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: pods } = useQuery({
     queryKey: ["pod-metrics", activeCluster, pool],
@@ -28,51 +26,18 @@ export function EPPDecisionVisualizer({ pool }: EPPDecisionVisualizerProps) {
     queryFn: () => fetchEPPDecisions(pool, 10),
   });
 
-  useEffect(() => {
-    let disposed = false;
-
-    function connect() {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const baseUrl = import.meta.env.VITE_API_URL || "/api/v1";
-      const wsUrl = `${protocol}//${window.location.host}${baseUrl}/ws/inference/epp-decisions`;
-
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (!disposed) setConnected(true);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.topic === "epp-decisions" && msg.data?.requestId) {
-            const decision = msg.data as EPPDecision;
-            setWsDecisions((prev) => [decision, ...prev].slice(0, 20));
-            setHighlightedPod(decision.selectedPod);
-            setTimeout(() => setHighlightedPod(null), 800);
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      };
-
-      ws.onclose = () => {
-        if (!disposed) {
-          setConnected(false);
-          reconnectTimer.current = setTimeout(connect, 3000);
-        }
-      };
-    }
-
-    connect();
-
-    return () => {
-      disposed = true;
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
-    };
-  }, []);
+  const { connected } = useWebSocket({
+    url: "/api/v1/ws/inference/epp-decisions",
+    onMessage: (msg: unknown) => {
+      const data = msg as { topic?: string; data?: EPPDecision };
+      if (data.topic === "epp-decisions" && data.data?.requestId) {
+        const decision = data.data;
+        setWsDecisions((prev) => [decision, ...prev].slice(0, 20));
+        setHighlightedPod(decision.selectedPod);
+        setTimeout(() => setHighlightedPod(null), 800);
+      }
+    },
+  });
 
   const decisions = wsDecisions.length > 0 ? wsDecisions : initialDecisions ?? [];
 

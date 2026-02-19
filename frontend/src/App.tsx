@@ -1,6 +1,7 @@
 import { Suspense, useEffect } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { Toaster } from "sonner";
 import { routes } from "./routes";
 import { fetchConfig } from "./api/config";
 import { useSettingsStore } from "./store/settingsStore";
@@ -41,6 +42,7 @@ export default function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <EditionDetector />
+        <Toaster theme="dark" position="bottom-right" richColors closeButton />
         <Suspense
           fallback={
             <div className="flex h-screen items-center justify-center">

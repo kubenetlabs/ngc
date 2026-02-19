@@ -3,6 +3,8 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -14,65 +16,49 @@ const (
 	wsPingInterval = 30 * time.Second
 )
 
+// allowedWSOrigins caches the parsed CORS_ALLOWED_ORIGINS for WebSocket origin checks.
+var allowedWSOrigins []string
+
+func init() {
+	raw := os.Getenv("CORS_ALLOWED_ORIGINS")
+	if raw == "" || raw == "*" {
+		allowedWSOrigins = nil // nil means allow all
+	} else {
+		for _, o := range strings.Split(raw, ",") {
+			if trimmed := strings.TrimSpace(o); trimmed != "" {
+				allowedWSOrigins = append(allowedWSOrigins, trimmed)
+			}
+		}
+	}
+}
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow all origins in development; restrict in production.
-		return true
+		if allowedWSOrigins == nil {
+			return true // development mode: allow all
+		}
+		origin := r.Header.Get("Origin")
+		for _, allowed := range allowedWSOrigins {
+			if allowed == origin {
+				return true
+			}
+		}
+		slog.Warn("websocket origin rejected", "origin", origin)
+		return false
 	},
 }
 
-// HandleWebSocket upgrades an HTTP connection to WebSocket and manages the
-// bidirectional message loop. This is a stub implementation.
-func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		slog.Error("websocket upgrade failed", "error", err)
-		return
-	}
-	defer conn.Close()
-
-	slog.Info("websocket connected", "remote_addr", r.RemoteAddr)
-
-	conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
-		return nil
-	})
-
-	// Ping ticker to detect stale connections.
-	ticker := time.NewTicker(wsPingInterval)
-	defer ticker.Stop()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			msgType, msg, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-					slog.Error("websocket read error", "error", err)
-				}
-				return
-			}
-			conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
-			if err := conn.WriteMessage(msgType, msg); err != nil {
-				slog.Error("websocket write error", "error", err)
-				return
-			}
+// HandleLegacyWS returns an HTTP handler that upgrades to WebSocket and
+// subscribes the client to the Hub. The topic is read from the ?topic=
+// query parameter, defaulting to "*" (all topics).
+func HandleLegacyWS(hub *Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		topic := r.URL.Query().Get("topic")
+		if topic == "" {
+			topic = "*"
 		}
-	}()
-
-	for {
-		select {
-		case <-ticker.C:
-			conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
-		case <-done:
-			return
-		}
+		hub.ServeWS(topic)(w, r)
 	}
 }

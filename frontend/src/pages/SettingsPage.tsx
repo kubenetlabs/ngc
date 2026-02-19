@@ -9,7 +9,8 @@ import {
   type AlertRule,
   type CreateAlertRuleRequest,
 } from "@/api/alerts";
-import { Bell, Trash2, ExternalLink } from "lucide-react";
+import { Bell, Trash2, ExternalLink, Sun, Moon } from "lucide-react";
+import { useSettingsStore } from "@/store/settingsStore";
 
 const inputClass =
   "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
@@ -237,6 +238,53 @@ function NotificationsTab() {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// --- Preferences Tab ---
+
+function PreferencesTab() {
+  const { theme, toggleTheme, defaultNamespace, setDefaultNamespace } =
+    useSettingsStore();
+
+  return (
+    <div className="mt-6 space-y-6">
+      {/* Theme */}
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">Theme</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Choose between light and dark mode for the console interface.
+        </p>
+        <button
+          onClick={toggleTheme}
+          className="mt-3 inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/50"
+        >
+          {theme === "dark" ? (
+            <Sun className="h-4 w-4" />
+          ) : (
+            <Moon className="h-4 w-4" />
+          )}
+          Switch to {theme === "dark" ? "Light" : "Dark"} Mode
+        </button>
+      </div>
+
+      {/* Default Namespace */}
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">
+          Default Namespace
+        </h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Set the default Kubernetes namespace used when filtering resources.
+        </p>
+        <input
+          type="text"
+          value={defaultNamespace}
+          onChange={(e) => setDefaultNamespace(e.target.value)}
+          className={inputClass + " mt-3 max-w-sm"}
+          placeholder="default"
+        />
       </div>
     </div>
   );
@@ -579,19 +627,7 @@ export default function SettingsPage() {
       {activeTab === "Notifications" && <NotificationsTab />}
 
       {/* Tab: Preferences */}
-      {activeTab === "Preferences" && (
-        <div className="mt-6">
-          <div className="rounded-lg border border-border p-8 text-center">
-            <p className="text-lg font-medium text-foreground">
-              Preferences
-            </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Coming soon. User preferences and theme settings will be
-              available in a future update.
-            </p>
-          </div>
-        </div>
-      )}
+      {activeTab === "Preferences" && <PreferencesTab />}
     </div>
   );
 }

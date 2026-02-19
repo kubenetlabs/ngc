@@ -81,6 +81,13 @@ clickhouse:
     tag: "24.1"
   persistence:
     size: 50Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 4Gi
   retention:
     rawLogs: 7d
     rollups1m: 90d

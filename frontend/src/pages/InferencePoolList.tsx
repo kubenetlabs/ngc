@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { fetchInferencePools } from "@/api/inference";
 import { GPUUtilizationBar } from "@/components/inference/GPUUtilizationBar";
+import { ErrorState } from "@/components/common/ErrorState";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
 
 function timeAgo(dateStr: string): string {
@@ -17,7 +18,7 @@ function timeAgo(dateStr: string): string {
 export default function InferencePoolList() {
   const activeCluster = useActiveCluster();
 
-  const { data: pools, isLoading, error } = useQuery({
+  const { data: pools, isLoading, error, refetch } = useQuery({
     queryKey: ["inference-pools", activeCluster],
     queryFn: fetchInferencePools,
     refetchInterval: 10000,
@@ -47,7 +48,7 @@ export default function InferencePoolList() {
       </div>
 
       {isLoading && <p className="mt-6 text-muted-foreground">Loading pools...</p>}
-      {error && <p className="mt-6 text-red-400">Failed to load pools: {String(error)}</p>}
+      {error && <ErrorState error={error as Error} onRetry={() => refetch()} message="Failed to load inference pools" />}
 
       {pools && pools.length === 0 && (
         <p className="mt-6 text-muted-foreground">No inference pools found.</p>

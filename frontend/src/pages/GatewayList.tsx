@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchGateways } from "@/api/gateways";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { ErrorState } from "@/components/common/ErrorState";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
 import { ALL_CLUSTERS } from "@/store/clusterStore";
 import { GlobalGatewayList } from "@/components/global/GlobalGatewayList";
@@ -26,7 +27,7 @@ function SingleClusterGatewayList() {
   const nsFilter = searchParams.get("namespace") ?? "";
   const activeCluster = useActiveCluster();
 
-  const { data: gateways, isLoading, error } = useQuery({
+  const { data: gateways, isLoading, error, refetch } = useQuery({
     queryKey: ["gateways", activeCluster, nsFilter],
     queryFn: () => fetchGateways(nsFilter || undefined),
   });
@@ -60,7 +61,7 @@ function SingleClusterGatewayList() {
       </div>
 
       {isLoading && <p className="mt-6 text-muted-foreground">Loading gateways...</p>}
-      {error && <p className="mt-6 text-red-400">Failed to load gateways: {String(error)}</p>}
+      {error && <ErrorState error={error as Error} onRetry={() => refetch()} message="Failed to load gateways" />}
 
       {gateways && gateways.length === 0 && (
         <p className="mt-6 text-muted-foreground">No gateways found.</p>

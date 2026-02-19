@@ -36,10 +36,11 @@ type Config struct {
 
 // Server is the main HTTP server for the NGF Console API.
 type Server struct {
-	Router    chi.Router
-	Config    Config
-	Hub       *Hub
-	Evaluator *alerting.Evaluator
+	Router     chi.Router
+	Config     Config
+	Hub        *Hub
+	Evaluator  *alerting.Evaluator
+	AuthConfig AuthConfig
 }
 
 // New creates a new Server with all routes and middleware configured.
@@ -61,7 +62,16 @@ func New(cfg Config) *Server {
 	eval := alerting.New(cfg.Store, cfg.PromClient, cfg.Webhooks)
 	eval.Start(context.Background())
 
-	s := &Server{Router: r, Config: cfg, Hub: hub, Evaluator: eval}
+	authCfg := AuthConfig{
+		Enabled:   os.Getenv("AUTH_ENABLED") == "true",
+		JWTSecret: os.Getenv("JWT_SECRET"),
+		Issuer:    os.Getenv("JWT_ISSUER"),
+	}
+	if authCfg.Enabled {
+		slog.Info("JWT authentication enabled")
+	}
+
+	s := &Server{Router: r, Config: cfg, Hub: hub, Evaluator: eval, AuthConfig: authCfg}
 	s.registerRoutes()
 
 	return s
@@ -136,6 +146,9 @@ func (s *Server) registerRoutes() {
 	s.Router.Get("/api/v1/health", handlers.HealthCheck)
 
 	s.Router.Route("/api/v1", func(r chi.Router) {
+		// Auth middleware (no-op when AUTH_ENABLED is not "true")
+		r.Use(AuthMiddleware(s.AuthConfig))
+
 		// Cluster management (hub-level, no cluster middleware)
 		r.Get("/clusters", clusterHandler.List)
 		r.Post("/clusters", clusterHandler.Register)
@@ -170,11 +183,11 @@ func (s *Server) registerRoutes() {
 			s.mountResourceRoutes(r, gw, rt, grpcRt, tlsRt, tcpRt, udpRt, cfgHandler, pol, cert, met, lg, topo, diag, inf, infMet, infDiag, infStack, gwBundle, coex, xc, mig, aud, alert)
 		})
 
-		// WebSocket
-		r.Get("/ws", HandleWebSocket)
+		// WebSocket (Hub-integrated, supports ?topic= query param)
+		r.Get("/ws", HandleLegacyWS(s.Hub))
 
-		// Events
-		r.Get("/events", HandleWebSocket)
+		// Events (alias for WebSocket)
+		r.Get("/events", HandleLegacyWS(s.Hub))
 
 		// Inference WebSocket topics
 		r.Get("/ws/inference/epp-decisions", s.Hub.ServeWS("epp-decisions"))

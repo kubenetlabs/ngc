@@ -68,17 +68,18 @@ describe("SettingsPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows Preferences tab content when clicked", async () => {
+  it("shows Preferences tab with theme toggle and namespace input", async () => {
     const { default: userEvent } = await import("@testing-library/user-event");
     const user = userEvent.setup();
     render(<SettingsPage />, { wrapper: createWrapper() });
 
     await user.click(screen.getByText("Preferences"));
 
+    expect(screen.getByText("Theme")).toBeInTheDocument();
+    expect(screen.getByText("Default Namespace")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Coming soon. User preferences and theme settings will be available in a future update.",
-      ),
+      screen.getByRole("button", { name: /Switch to .+ Mode/ }),
     ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("default")).toBeInTheDocument();
   });
 });
