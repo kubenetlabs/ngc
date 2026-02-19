@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	prom "github.com/kubenetlabs/ngc/api/internal/prometheus"
 )
 
 var distributedCloudPublishGVR = schema.GroupVersionResource{
@@ -64,7 +66,9 @@ type XCRegion struct {
 }
 
 // XCHandler handles cross-cluster (XC) API requests.
-type XCHandler struct{}
+type XCHandler struct {
+	Prom *prom.Client
+}
 
 // getDynamicClient returns the dynamic client from the cluster context.
 func (h *XCHandler) getDynamicClient(r *http.Request) dynamic.Interface {
@@ -174,17 +178,101 @@ func (h *XCHandler) DeletePublish(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Metrics returns cross-cluster traffic metrics (mock data).
+// Metrics returns cross-cluster traffic metrics for published routes.
 func (h *XCHandler) Metrics(w http.ResponseWriter, r *http.Request) {
+	dc := h.getDynamicClient(r)
+
+	var routeNames []string
+	var regions []string
+
+	if dc != nil {
+		list, err := dc.Resource(distributedCloudPublishGVR).Namespace("").List(r.Context(), metav1.ListOptions{})
+		if err == nil {
+			for _, item := range list.Items {
+				spec, _ := item.Object["spec"].(map[string]interface{})
+				if spec == nil {
+					continue
+				}
+				if ref, ok := spec["httpRouteRef"].(string); ok && ref != "" {
+					routeNames = append(routeNames, ref)
+				}
+				// Extract regions from distributedCloud.multiRegion.regions
+				if dcConfig, ok := spec["distributedCloud"].(map[string]interface{}); ok {
+					if mr, ok := dcConfig["multiRegion"].(map[string]interface{}); ok {
+						if regionList, ok := mr["regions"].([]interface{}); ok {
+							for _, reg := range regionList {
+								if s, ok := reg.(string); ok {
+									regions = append(regions, s)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// If no publishes or no Prometheus, return zeros
+	if len(routeNames) == 0 || h.Prom == nil {
+		writeJSON(w, http.StatusOK, XCMetricsResponse{
+			TotalRequests: 0,
+			AvgLatencyMs:  0,
+			ErrorRate:     0,
+			Regions:       []XCRegion{},
+		})
+		return
+	}
+
+	// Build route name filter for Prometheus queries
+	routeFilter := strings.Join(routeNames, "|")
+	cn := cluster.ClusterNameFromContext(r.Context())
+	cs := ""
+	if cn != "" {
+		cs = fmt.Sprintf(`cluster_name="%s",`, cn)
+	}
+
+	now := time.Now()
+	var totalRequests, errorRate, avgLatency float64
+
+	// Query total request rate
+	if val, err := h.Prom.QueryScalar(r.Context(),
+		fmt.Sprintf(`sum(rate(nginx_gateway_fabric_http_requests_total{%shttproute_name=~"%s"}[5m]))`, cs, routeFilter),
+		now); err == nil {
+		totalRequests = val
+	}
+
+	// Query error rate
+	if val, err := h.Prom.QueryScalar(r.Context(),
+		fmt.Sprintf(`sum(rate(nginx_gateway_fabric_http_requests_total{%shttproute_name=~"%s",status=~"5.."}[5m])) / sum(rate(nginx_gateway_fabric_http_requests_total{%shttproute_name=~"%s"}[5m]))`, cs, routeFilter, cs, routeFilter),
+		now); err == nil {
+		errorRate = val
+	}
+
+	// Query avg latency
+	if val, err := h.Prom.QueryScalar(r.Context(),
+		fmt.Sprintf(`histogram_quantile(0.50, sum(rate(nginx_gateway_fabric_http_request_duration_seconds_bucket{%shttproute_name=~"%s"}[5m])) by (le)) * 1000`, cs, routeFilter),
+		now); err == nil {
+		avgLatency = val
+	}
+
+	// Build regional breakdown
+	xcRegions := make([]XCRegion, 0, len(regions))
+	if len(regions) > 0 {
+		perRegion := totalRequests / float64(len(regions))
+		for _, reg := range regions {
+			xcRegions = append(xcRegions, XCRegion{
+				Name:      reg,
+				Requests:  int64(perRegion),
+				LatencyMs: avgLatency,
+			})
+		}
+	}
+
 	writeJSON(w, http.StatusOK, XCMetricsResponse{
-		TotalRequests: 45230,
-		AvgLatencyMs:  12.5,
-		ErrorRate:     0.02,
-		Regions: []XCRegion{
-			{Name: "us-east-1", Requests: 15000, LatencyMs: 10.2},
-			{Name: "eu-west-1", Requests: 20000, LatencyMs: 15.8},
-			{Name: "ap-southeast-1", Requests: 10230, LatencyMs: 11.5},
-		},
+		TotalRequests: int64(totalRequests * 300), // 5-minute rate * 300 seconds = approximate 5-min total
+		AvgLatencyMs:  avgLatency,
+		ErrorRate:     errorRate,
+		Regions:       xcRegions,
 	})
 }
 

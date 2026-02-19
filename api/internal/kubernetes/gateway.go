@@ -186,3 +186,12 @@ func (c *Client) DeleteSecret(ctx context.Context, namespace, name string) error
 	}
 	return nil
 }
+
+// ListNodes returns all nodes in the cluster.
+func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
+	var list corev1.NodeList
+	if err := c.client.List(ctx, &list); err != nil {
+		return nil, fmt.Errorf("listing nodes: %w", err)
+	}
+	return list.Items, nil
+}

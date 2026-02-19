@@ -175,3 +175,9 @@ func (c *Client) queryScalar(ctx context.Context, query string, t time.Time) (fl
 	}
 	return 0, fmt.Errorf("no data for query: %s", query)
 }
+
+// QueryScalar executes a Prometheus query and returns a single scalar value.
+// This is a public wrapper around the private queryScalar method.
+func (c *Client) QueryScalar(ctx context.Context, query string, t time.Time) (float64, error) {
+	return c.queryScalar(ctx, query, t)
+}

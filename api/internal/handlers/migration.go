@@ -7,6 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"gopkg.in/yaml.v3"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/kubenetlabs/ngc/api/internal/cluster"
 )
 
 // MigrationHandler handles NGINX config migration API requests.
@@ -99,7 +107,8 @@ type ApplyResponse struct {
 
 // ValidateRequest asks for validation of migrated resources.
 type ValidateRequest struct {
-	ImportID string `json:"importId"`
+	ImportID  string              `json:"importId"`
+	Resources []GeneratedResource `json:"resources,omitempty"`
 }
 
 // ValidateResponse describes the validation result.
@@ -523,9 +532,64 @@ func (h *MigrationHandler) Apply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Real implementation requires dynamic client to apply unstructured resources.
-	// Return 501 until cluster-backed apply is implemented.
-	writeError(w, http.StatusNotImplemented, "cluster-backed apply is not yet implemented; use dry-run mode to preview")
+	// Real cluster-backed apply
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+	dc := k8s.DynamicClient()
+	if dc == nil {
+		writeError(w, http.StatusServiceUnavailable, "dynamic client unavailable")
+		return
+	}
+
+	applied := 0
+	skipped := 0
+	var applyErrors []string
+
+	for _, res := range req.Resources {
+		if res.YAML == "" {
+			applyErrors = append(applyErrors, fmt.Sprintf("%s/%s: empty YAML", res.Kind, res.Name))
+			continue
+		}
+
+		var obj map[string]interface{}
+		if err := yaml.Unmarshal([]byte(res.YAML), &obj); err != nil {
+			applyErrors = append(applyErrors, fmt.Sprintf("%s/%s: invalid YAML: %v", res.Kind, res.Name, err))
+			continue
+		}
+
+		u := &unstructured.Unstructured{Object: obj}
+		gvr, err := kindToGVR(res.APIVersion, res.Kind)
+		if err != nil {
+			applyErrors = append(applyErrors, fmt.Sprintf("%s/%s: %v", res.Kind, res.Name, err))
+			continue
+		}
+
+		ns := u.GetNamespace()
+		if ns == "" {
+			ns = "default"
+		}
+
+		_, err = dc.Resource(gvr).Namespace(ns).Create(r.Context(), u, metav1.CreateOptions{})
+		if err != nil {
+			if k8serrors.IsAlreadyExists(err) {
+				skipped++
+			} else {
+				applyErrors = append(applyErrors, fmt.Sprintf("%s/%s: %v", res.Kind, res.Name, err))
+			}
+			continue
+		}
+		applied++
+	}
+
+	writeJSON(w, http.StatusOK, ApplyResponse{
+		Applied: applied,
+		Skipped: skipped,
+		Errors:  applyErrors,
+		DryRun:  false,
+	})
 }
 
 // Validate validates migrated resources against the running gateway.
@@ -541,7 +605,179 @@ func (h *MigrationHandler) Validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Real implementation requires cluster access to validate applied resources.
-	// Return 501 until cluster-backed validation is implemented.
-	writeError(w, http.StatusNotImplemented, "cluster-backed validation is not yet implemented")
+	if len(req.Resources) == 0 {
+		writeError(w, http.StatusBadRequest, "resources are required for validation")
+		return
+	}
+
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+	dc := k8s.DynamicClient()
+	if dc == nil {
+		writeError(w, http.StatusServiceUnavailable, "dynamic client unavailable")
+		return
+	}
+
+	var checks []ValidationCheck
+	allPassed := true
+
+	for _, res := range req.Resources {
+		resourceLabel := fmt.Sprintf("%s/%s", res.Kind, res.Name)
+
+		gvr, err := kindToGVR(res.APIVersion, res.Kind)
+		if err != nil {
+			checks = append(checks, ValidationCheck{
+				Name:    resourceLabel + "/supported",
+				Status:  "failed",
+				Message: err.Error(),
+			})
+			allPassed = false
+			continue
+		}
+
+		ns := res.Namespace
+		if ns == "" {
+			ns = "default"
+		}
+
+		obj, err := dc.Resource(gvr).Namespace(ns).Get(r.Context(), res.Name, metav1.GetOptions{})
+		if err != nil {
+			checks = append(checks, ValidationCheck{
+				Name:    resourceLabel + "/exists",
+				Status:  "failed",
+				Message: fmt.Sprintf("resource not found: %v", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		checks = append(checks, ValidationCheck{
+			Name:    resourceLabel + "/exists",
+			Status:  "passed",
+			Message: "resource exists in cluster",
+		})
+
+		// Check status conditions if available
+		conditions := extractConditions(obj)
+		for _, c := range conditions {
+			status := "passed"
+			if c.status != "True" {
+				status = "warning"
+				if allPassed {
+					allPassed = false
+				}
+			}
+			checks = append(checks, ValidationCheck{
+				Name:    fmt.Sprintf("%s/condition/%s", resourceLabel, c.condType),
+				Status:  status,
+				Message: c.message,
+			})
+		}
+	}
+
+	overallStatus := "passed"
+	hasFailed := false
+	hasWarning := false
+	for _, c := range checks {
+		if c.Status == "failed" {
+			hasFailed = true
+		}
+		if c.Status == "warning" {
+			hasWarning = true
+		}
+	}
+	if hasFailed {
+		overallStatus = "failed"
+	} else if hasWarning {
+		overallStatus = "warning"
+	}
+
+	writeJSON(w, http.StatusOK, ValidateResponse{
+		ImportID: req.ImportID,
+		Status:   overallStatus,
+		Checks:   checks,
+	})
+}
+
+// kindToGVR maps a Gateway API apiVersion+kind to a GroupVersionResource.
+func kindToGVR(apiVersion, kind string) (schema.GroupVersionResource, error) {
+	key := apiVersion + "/" + kind
+	gvrMap := map[string]schema.GroupVersionResource{
+		"gateway.networking.k8s.io/v1/Gateway":             {Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"},
+		"gateway.networking.k8s.io/v1/HTTPRoute":           {Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"},
+		"gateway.networking.k8s.io/v1/GRPCRoute":           {Group: "gateway.networking.k8s.io", Version: "v1", Resource: "grpcroutes"},
+		"gateway.networking.k8s.io/v1alpha2/TLSRoute":      {Group: "gateway.networking.k8s.io", Version: "v1alpha2", Resource: "tlsroutes"},
+		"gateway.networking.k8s.io/v1alpha2/TCPRoute":      {Group: "gateway.networking.k8s.io", Version: "v1alpha2", Resource: "tcproutes"},
+		"gateway.networking.k8s.io/v1alpha2/UDPRoute":      {Group: "gateway.networking.k8s.io", Version: "v1alpha2", Resource: "udproutes"},
+		"gateway.networking.k8s.io/v1beta1/ReferenceGrant": {Group: "gateway.networking.k8s.io", Version: "v1beta1", Resource: "referencegrants"},
+	}
+	if gvr, ok := gvrMap[key]; ok {
+		return gvr, nil
+	}
+	return schema.GroupVersionResource{}, fmt.Errorf("unsupported resource type: %s %s", apiVersion, kind)
+}
+
+type conditionInfo struct {
+	condType string
+	status   string
+	message  string
+}
+
+func extractConditions(obj *unstructured.Unstructured) []conditionInfo {
+	status, ok := obj.Object["status"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Check direct conditions (for Gateways)
+	condSlice, ok := status["conditions"].([]interface{})
+	if !ok {
+		// Check parent status conditions (for Routes)
+		parents, ok := status["parents"].([]interface{})
+		if !ok {
+			return nil
+		}
+		var result []conditionInfo
+		for _, p := range parents {
+			pm, ok := p.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			pConds, ok := pm["conditions"].([]interface{})
+			if !ok {
+				continue
+			}
+			for _, c := range pConds {
+				if ci := parseCondition(c); ci != nil {
+					result = append(result, *ci)
+				}
+			}
+		}
+		return result
+	}
+
+	var result []conditionInfo
+	for _, c := range condSlice {
+		if ci := parseCondition(c); ci != nil {
+			result = append(result, *ci)
+		}
+	}
+	return result
+}
+
+func parseCondition(c interface{}) *conditionInfo {
+	cm, ok := c.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	ct, _ := cm["type"].(string)
+	cs, _ := cm["status"].(string)
+	msg, _ := cm["message"].(string)
+	if ct == "" {
+		return nil
+	}
+	return &conditionInfo{condType: ct, status: cs, message: msg}
 }

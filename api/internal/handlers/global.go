@@ -190,12 +190,45 @@ func (h *GlobalHandler) GPUCapacity(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// queryGPUCapacity queries a single cluster for GPU capacity.
-func queryGPUCapacity(_ context.Context, cc *mc.ClusterClient) gpuClusterCapacity {
-	return gpuClusterCapacity{
+// queryGPUCapacity queries a single cluster for GPU capacity from node resources.
+func queryGPUCapacity(ctx context.Context, cc *mc.ClusterClient) gpuClusterCapacity {
+	cap := gpuClusterCapacity{
 		ClusterName:   cc.Name,
 		ClusterRegion: cc.Region,
-		TotalGPUs:     0,
-		AllocatedGPUs: 0,
+		GPUTypes:      map[string]int{},
 	}
+
+	if cc.K8sClient == nil {
+		return cap
+	}
+
+	nodes, err := cc.K8sClient.ListNodes(ctx)
+	if err != nil {
+		return cap
+	}
+
+	for _, node := range nodes {
+		// Check nvidia.com/gpu in node capacity
+		if gpuQty, ok := node.Status.Capacity["nvidia.com/gpu"]; ok {
+			total := int(gpuQty.Value())
+			cap.TotalGPUs += total
+		}
+
+		// Check nvidia.com/gpu in node allocatable
+		if gpuQty, ok := node.Status.Allocatable["nvidia.com/gpu"]; ok {
+			allocatable := int(gpuQty.Value())
+			// Allocated = Capacity - Allocatable per node
+			if capacityQty, ok2 := node.Status.Capacity["nvidia.com/gpu"]; ok2 {
+				totalOnNode := int(capacityQty.Value())
+				cap.AllocatedGPUs += totalOnNode - allocatable
+			}
+		}
+
+		// Collect GPU types from node labels
+		if gpuType, ok := node.Labels["nvidia.com/gpu.product"]; ok {
+			cap.GPUTypes[gpuType]++
+		}
+	}
+
+	return cap
 }

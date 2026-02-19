@@ -1,46 +1,37 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/kubernetes"
 )
 
 // TopologyHandler handles topology graph API requests.
 type TopologyHandler struct{}
 
-// Full returns the full cluster topology graph.
-// It lists all Gateways, HTTPRoutes, and Services, then builds a node/edge graph
-// showing how routes connect gateways to backend services.
-func (h *TopologyHandler) Full(w http.ResponseWriter, r *http.Request) {
-	k8s := cluster.ClientFromContext(r.Context())
-	if k8s == nil {
-		writeError(w, http.StatusServiceUnavailable, "no cluster context")
-		return
-	}
-
-	ctx := r.Context()
-
+// buildGraph constructs the full topology graph of gateways, routes, and services.
+func (h *TopologyHandler) buildGraph(ctx context.Context, k8s *kubernetes.Client) ([]TopologyNode, []TopologyEdge, error) {
 	// List all Gateways across all namespaces.
 	gateways, err := k8s.ListGateways(ctx, "")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("listing gateways: %v", err))
-		return
+		return nil, nil, fmt.Errorf("listing gateways: %w", err)
 	}
 
 	// List all HTTPRoutes across all namespaces.
 	routes, err := k8s.ListHTTPRoutes(ctx, "")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("listing httproutes: %v", err))
-		return
+		return nil, nil, fmt.Errorf("listing httproutes: %w", err)
 	}
 
 	// List all Services across all namespaces.
 	services, err := k8s.ListServices(ctx, "")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("listing services: %v", err))
-		return
+		return nil, nil, fmt.Errorf("listing services: %w", err)
 	}
 
 	var nodes []TopologyNode
@@ -179,6 +170,25 @@ func (h *TopologyHandler) Full(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	return nodes, edges, nil
+}
+
+// Full returns the full cluster topology graph.
+// It lists all Gateways, HTTPRoutes, and Services, then builds a node/edge graph
+// showing how routes connect gateways to backend services.
+func (h *TopologyHandler) Full(w http.ResponseWriter, r *http.Request) {
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	nodes, edges, err := h.buildGraph(r.Context(), k8s)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	// Ensure non-nil slices in response.
 	if nodes == nil {
 		nodes = []TopologyNode{}
@@ -187,13 +197,96 @@ func (h *TopologyHandler) Full(w http.ResponseWriter, r *http.Request) {
 		edges = []TopologyEdge{}
 	}
 
-	writeJSON(w, http.StatusOK, TopologyResponse{
-		Nodes: nodes,
-		Edges: edges,
-	})
+	writeJSON(w, http.StatusOK, TopologyResponse{Nodes: nodes, Edges: edges})
 }
 
 // ByGateway returns the topology graph scoped to a specific gateway.
 func (h *TopologyHandler) ByGateway(w http.ResponseWriter, r *http.Request) {
-	writeNotImplemented(w)
+	k8s := cluster.ClientFromContext(r.Context())
+	if k8s == nil {
+		writeError(w, http.StatusServiceUnavailable, "no cluster context")
+		return
+	}
+
+	name := chi.URLParam(r, "name")
+	namespace := r.URL.Query().Get("namespace")
+
+	nodes, edges, err := h.buildGraph(r.Context(), k8s)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Find the gateway node.
+	var gatewayID string
+	if namespace != "" {
+		gatewayID = fmt.Sprintf("gateway/%s/%s", namespace, name)
+	} else {
+		// Search all nodes for a gateway matching the name.
+		for _, n := range nodes {
+			if n.Type == "gateway" && n.Name == name {
+				gatewayID = n.ID
+				break
+			}
+		}
+	}
+
+	if gatewayID == "" {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found in topology", name))
+		return
+	}
+
+	// Verify the gateway node exists.
+	found := false
+	for _, n := range nodes {
+		if n.ID == gatewayID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found in topology", name))
+		return
+	}
+
+	// Build connected set: start with gateway, find routes, then services.
+	connectedNodes := map[string]bool{gatewayID: true}
+
+	// Find routes connected to this gateway (edges where Target == gatewayID and Type == "parentRef").
+	for _, e := range edges {
+		if e.Target == gatewayID && e.Type == "parentRef" {
+			connectedNodes[e.Source] = true
+		}
+	}
+
+	// Find services connected to those routes (edges where Source is a connected route and Type == "backendRef").
+	for _, e := range edges {
+		if connectedNodes[e.Source] && e.Type == "backendRef" {
+			connectedNodes[e.Target] = true
+		}
+	}
+
+	// Filter nodes and edges.
+	var filteredNodes []TopologyNode
+	for _, n := range nodes {
+		if connectedNodes[n.ID] {
+			filteredNodes = append(filteredNodes, n)
+		}
+	}
+
+	var filteredEdges []TopologyEdge
+	for _, e := range edges {
+		if connectedNodes[e.Source] && connectedNodes[e.Target] {
+			filteredEdges = append(filteredEdges, e)
+		}
+	}
+
+	if filteredNodes == nil {
+		filteredNodes = []TopologyNode{}
+	}
+	if filteredEdges == nil {
+		filteredEdges = []TopologyEdge{}
+	}
+
+	writeJSON(w, http.StatusOK, TopologyResponse{Nodes: filteredNodes, Edges: filteredEdges})
 }

@@ -224,7 +224,8 @@ func TestXCHandler_DeletePublish_HappyPath(t *testing.T) {
 	}
 }
 
-func TestXCHandler_Metrics_ReturnsHardcoded(t *testing.T) {
+func TestXCHandler_Metrics_NoPublishes(t *testing.T) {
+	// With no cluster context (nil dynamic client), Metrics should return zeros
 	handler := &XCHandler{}
 
 	r := chi.NewRouter()
@@ -243,10 +244,44 @@ func TestXCHandler_Metrics_ReturnsHardcoded(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp.TotalRequests != 45230 {
-		t.Errorf("expected totalRequests=45230, got %d", resp.TotalRequests)
+	if resp.TotalRequests != 0 {
+		t.Errorf("expected totalRequests=0, got %d", resp.TotalRequests)
 	}
-	if len(resp.Regions) != 3 {
-		t.Errorf("expected 3 regions, got %d", len(resp.Regions))
+	if len(resp.Regions) != 0 {
+		t.Errorf("expected 0 regions, got %d", len(resp.Regions))
+	}
+}
+
+func TestXCHandler_Metrics_WithPublishesNoProm(t *testing.T) {
+	// With publishes but no Prometheus client, Metrics should return zeros
+	p1 := newTestXCPublish("pub-1", "default")
+	dc := newFakeXCDynamicClient(p1)
+	handler := &XCHandler{Prom: nil}
+
+	r := chi.NewRouter()
+	r.Use(xcContextMiddleware(dc))
+	r.Get("/xc/metrics", handler.Metrics)
+
+	req := httptest.NewRequest(http.MethodGet, "/xc/metrics", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp XCMetricsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.TotalRequests != 0 {
+		t.Errorf("expected totalRequests=0, got %d", resp.TotalRequests)
+	}
+	if resp.ErrorRate != 0 {
+		t.Errorf("expected errorRate=0, got %f", resp.ErrorRate)
+	}
+	if len(resp.Regions) != 0 {
+		t.Errorf("expected 0 regions, got %d", len(resp.Regions))
 	}
 }
