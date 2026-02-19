@@ -16,8 +16,16 @@ import {
   Server,
 } from "lucide-react";
 import { useEdition } from "@/hooks/useEdition";
+import type { LucideIcon } from "lucide-react";
 
-const navItems = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  enterprise?: boolean;
+}
+
+const navItems: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/clusters", label: "Clusters", icon: Server },
   { to: "/gateways", label: "Gateways", icon: Network },
