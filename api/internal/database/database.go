@@ -28,6 +28,11 @@ type Store interface {
 	ListSavedViews(ctx context.Context, userID string) ([]SavedView, error)
 	CreateSavedView(ctx context.Context, view SavedView) error
 	DeleteSavedView(ctx context.Context, id string) error
+
+	// XC credentials
+	GetXCCredentials(ctx context.Context) (*XCCredentials, error)
+	SaveXCCredentials(ctx context.Context, creds XCCredentials) error
+	DeleteXCCredentials(ctx context.Context) error
 }
 
 // AuditEntry represents a single audit log record.
@@ -78,4 +83,14 @@ type SavedView struct {
 	ViewType  string    `json:"viewType"` // e.g., "dashboard", "log-query", "metrics"
 	Config    string    `json:"config"`   // JSON config
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+// XCCredentials holds F5 Distributed Cloud connection credentials.
+type XCCredentials struct {
+	ID        string    `json:"id"`
+	Tenant    string    `json:"tenant"`
+	APIToken  string    `json:"apiToken"`
+	Namespace string    `json:"namespace"` // default XC namespace
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }

@@ -157,6 +157,29 @@ func main() {
 	}
 	slog.Info("config database ready", "path", *configDB)
 
+	// Seed XC credentials from environment variables (if set and DB has none).
+	if xcTenant := os.Getenv("XC_TENANT"); xcTenant != "" {
+		existing, _ := store.GetXCCredentials(context.Background())
+		if existing == nil {
+			xcToken := os.Getenv("XC_API_TOKEN")
+			xcNs := os.Getenv("XC_NAMESPACE")
+			if xcNs == "" {
+				xcNs = "default"
+			}
+			if xcToken != "" {
+				if err := store.SaveXCCredentials(context.Background(), database.XCCredentials{
+					Tenant:    xcTenant,
+					APIToken:  xcToken,
+					Namespace: xcNs,
+				}); err != nil {
+					slog.Warn("failed to seed XC credentials from env", "error", err)
+				} else {
+					slog.Info("XC credentials seeded from environment", "tenant", xcTenant, "namespace", xcNs)
+				}
+			}
+		}
+	}
+
 	// Parse alert webhook URLs.
 	var webhooks []alerting.WebhookConfig
 	if *alertWebhooks != "" {

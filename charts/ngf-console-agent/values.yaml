@@ -55,6 +55,12 @@ otelCollector:
       cpu: 200m
       memory: 256Mi
 
+distributedCloud:
+  enabled: false
+  tenant: ""        # XC tenant name (e.g., "my-tenant" → https://my-tenant.console.ves.volterra.io)
+  apiToken: ""      # XC API token (Bearer token for authentication)
+  namespace: "default"  # Default XC namespace for resources
+
 serviceAccount:
   create: true
   name: ngf-console-agent

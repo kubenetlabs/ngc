@@ -129,7 +129,7 @@ func (s *Server) registerRoutes() {
 	infStack := &handlers.InferenceStackHandler{MetricsProvider: s.Config.MetricsProvider}
 	gwBundle := &handlers.GatewayBundleHandler{}
 	coex := &handlers.CoexistenceHandler{}
-	xc := &handlers.XCHandler{}
+	xc := &handlers.XCHandler{Store: s.Config.Store}
 	mig := &handlers.MigrationHandler{}
 	aud := &handlers.AuditHandler{Store: s.Config.Store}
 	alert := &handlers.AlertHandler{Store: s.Config.Store, Evaluator: s.Evaluator}
@@ -387,13 +387,26 @@ func (s *Server) mountResourceRoutes(
 		r.Get("/migration-readiness", coex.MigrationReadiness)
 	})
 
-	// Cross-Cluster (XC)
+	// Cross-Cluster (XC) / F5 Distributed Cloud
 	r.Route("/xc", func(r chi.Router) {
 		r.Get("/status", xc.Status)
+		r.Get("/metrics", xc.Metrics)
+
+		// Credential management
+		r.Post("/credentials", xc.SaveCredentials)
+		r.Get("/credentials", xc.GetCredentials)
+		r.Delete("/credentials", xc.DeleteCredentials)
+		r.Post("/test-connection", xc.TestConnection)
+
+		// Publish lifecycle
+		r.Get("/publishes", xc.ListPublishes)
 		r.Post("/publish", xc.Publish)
+		r.Post("/preview", xc.Preview)
 		r.Get("/publish/{id}", xc.GetPublish)
 		r.Delete("/publish/{id}", xc.DeletePublish)
-		r.Get("/metrics", xc.Metrics)
+
+		// WAF policies
+		r.Get("/waf-policies", xc.ListWAFPolicies)
 	})
 
 	// Migration

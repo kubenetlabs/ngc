@@ -65,6 +65,18 @@ type DistributedCloudPublishStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// Phase is the lifecycle phase.
 	Phase string `json:"phase,omitempty"`
+	// XCLoadBalancerName is the name of the HTTP LB created in XC.
+	XCLoadBalancerName string `json:"xcLoadBalancerName,omitempty"`
+	// XCOriginPoolName is the name of the origin pool created in XC.
+	XCOriginPoolName string `json:"xcOriginPoolName,omitempty"`
+	// XCVirtualIP is the virtual IP assigned by XC.
+	XCVirtualIP string `json:"xcVirtualIP,omitempty"`
+	// XCDNS is the DNS name assigned by XC.
+	XCDNS string `json:"xcDNS,omitempty"`
+	// WAFPolicyAttached is the name of the WAF policy attached to the LB.
+	WAFPolicyAttached string `json:"wafPolicyAttached,omitempty"`
+	// LastSyncedAt is the last time the XC resources were verified.
+	LastSyncedAt *metav1.Time `json:"lastSyncedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true

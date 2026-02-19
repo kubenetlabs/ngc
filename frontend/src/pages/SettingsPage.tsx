@@ -9,7 +9,13 @@ import {
   type AlertRule,
   type CreateAlertRuleRequest,
 } from "@/api/alerts";
-import { Bell, Trash2, ExternalLink } from "lucide-react";
+import {
+  fetchXCCredentials,
+  saveXCCredentials,
+  deleteXCCredentials,
+  testXCConnection,
+} from "@/api/xc";
+import { Bell, Trash2, ExternalLink, Cloud } from "lucide-react";
 
 const inputClass =
   "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
@@ -242,9 +248,232 @@ function NotificationsTab() {
   );
 }
 
+// --- Distributed Cloud Tab ---
+
+function DistributedCloudTab() {
+  const queryClient = useQueryClient();
+  const [tenant, setTenant] = useState("");
+  const [apiToken, setApiToken] = useState("");
+  const [namespace, setNamespace] = useState("default");
+  const [testResult, setTestResult] = useState<{
+    connected: boolean;
+    message: string;
+  } | null>(null);
+
+  const { data: creds, isLoading: credsLoading } = useQuery({
+    queryKey: ["xc-credentials"],
+    queryFn: fetchXCCredentials,
+  });
+
+  // Populate form when existing credentials load.
+  useEffect(() => {
+    if (creds?.configured) {
+      setTenant(creds.tenant);
+      setNamespace(creds.namespace);
+    }
+  }, [creds]);
+
+  const saveMutation = useMutation({
+    mutationFn: saveXCCredentials,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["xc-credentials"] });
+      queryClient.invalidateQueries({ queryKey: ["xc-status"] });
+      setApiToken("");
+      setTestResult(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteXCCredentials,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["xc-credentials"] });
+      queryClient.invalidateQueries({ queryKey: ["xc-status"] });
+      setTenant("");
+      setApiToken("");
+      setNamespace("default");
+      setTestResult(null);
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: testXCConnection,
+    onSuccess: (result) => {
+      setTestResult(result);
+    },
+    onError: (err) => {
+      setTestResult({ connected: false, message: String(err) });
+    },
+  });
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenant.trim() || !apiToken.trim()) return;
+    saveMutation.mutate({
+      tenant: tenant.trim(),
+      apiToken: apiToken.trim(),
+      namespace: namespace.trim() || "default",
+    });
+  };
+
+  return (
+    <div className="mt-6 space-y-6">
+      {/* Info section */}
+      <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-4">
+        <div className="flex items-start gap-3">
+          <Cloud className="mt-0.5 h-5 w-5 text-blue-400" />
+          <div>
+            <p className="text-sm font-medium text-foreground">
+              F5 Distributed Cloud Connection
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Configure your F5 Distributed Cloud (XC) tenant credentials to
+              publish HTTPRoutes as HTTP Load Balancers with optional WAF
+              protection.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Status */}
+      {creds?.configured && (
+        <div className="rounded-lg border border-border p-4">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            <span className="text-sm font-medium text-foreground">
+              Configured
+            </span>
+            <span className="text-sm text-muted-foreground">
+              Tenant: {creds.tenant} | Namespace: {creds.namespace}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {credsLoading && (
+        <p className="text-sm text-muted-foreground">
+          Loading credentials...
+        </p>
+      )}
+
+      {/* Credential Form */}
+      <form onSubmit={handleSave} className="space-y-4">
+        <h3 className="text-sm font-semibold text-foreground">
+          {creds?.configured ? "Update Credentials" : "Configure Credentials"}
+        </h3>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="block text-sm font-medium text-muted-foreground">
+              Tenant Name
+            </label>
+            <input
+              value={tenant}
+              onChange={(e) => setTenant(e.target.value)}
+              className={inputClass}
+              placeholder="my-tenant"
+              required
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Your XC tenant name (from
+              https://&lt;tenant&gt;.console.ves.volterra.io)
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-muted-foreground">
+              XC Namespace
+            </label>
+            <input
+              value={namespace}
+              onChange={(e) => setNamespace(e.target.value)}
+              className={inputClass}
+              placeholder="default"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium text-muted-foreground">
+              API Token
+            </label>
+            <input
+              type="password"
+              value={apiToken}
+              onChange={(e) => setApiToken(e.target.value)}
+              className={inputClass}
+              placeholder={
+                creds?.configured
+                  ? "Enter new token to update"
+                  : "Enter your XC API token"
+              }
+              required={!creds?.configured}
+            />
+          </div>
+        </div>
+
+        {/* Test & Save buttons */}
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={saveMutation.isPending}
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saveMutation.isPending ? "Saving..." : "Save Credentials"}
+          </button>
+          {creds?.configured && (
+            <>
+              <button
+                type="button"
+                onClick={() => testMutation.mutate()}
+                disabled={testMutation.isPending}
+                className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+              >
+                {testMutation.isPending ? "Testing..." : "Test Connection"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm("Remove XC credentials?")) {
+                    deleteMutation.mutate();
+                  }
+                }}
+                disabled={deleteMutation.isPending}
+                className="rounded-md border border-red-500/30 px-4 py-2 text-sm font-medium text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Mutation errors */}
+        {saveMutation.isError && (
+          <p className="text-sm text-red-400">
+            {String(saveMutation.error)}
+          </p>
+        )}
+
+        {/* Test result */}
+        {testResult && (
+          <div
+            className={`rounded-lg border p-3 text-sm ${
+              testResult.connected
+                ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400"
+                : "border-red-500/30 bg-red-500/5 text-red-400"
+            }`}
+          >
+            {testResult.message}
+          </div>
+        )}
+      </form>
+    </div>
+  );
+}
+
 // --- Main Settings Page ---
 
-const TABS = ["Alert Rules", "Notifications", "Preferences"] as const;
+const TABS = [
+  "Alert Rules",
+  "Notifications",
+  "Distributed Cloud",
+  "Preferences",
+] as const;
 
 export default function SettingsPage() {
   const activeCluster = useActiveCluster();
@@ -577,6 +806,9 @@ export default function SettingsPage() {
 
       {/* Tab: Notifications */}
       {activeTab === "Notifications" && <NotificationsTab />}
+
+      {/* Tab: Distributed Cloud */}
+      {activeTab === "Distributed Cloud" && <DistributedCloudTab />}
 
       {/* Tab: Preferences */}
       {activeTab === "Preferences" && (

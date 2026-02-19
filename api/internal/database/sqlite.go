@@ -246,6 +246,41 @@ func (s *SQLiteStore) DeleteSavedView(ctx context.Context, id string) error {
 	return err
 }
 
+// GetXCCredentials returns the stored XC credentials (there is at most one row).
+func (s *SQLiteStore) GetXCCredentials(ctx context.Context) (*XCCredentials, error) {
+	var c XCCredentials
+	err := s.db.QueryRowContext(ctx,
+		"SELECT id, tenant, api_token, namespace, created_at, updated_at FROM xc_credentials LIMIT 1",
+	).Scan(&c.ID, &c.Tenant, &c.APIToken, &c.Namespace, &c.CreatedAt, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return &c, err
+}
+
+// SaveXCCredentials upserts XC credentials (replaces any existing row).
+func (s *SQLiteStore) SaveXCCredentials(ctx context.Context, creds XCCredentials) error {
+	if creds.ID == "" {
+		creds.ID = uuid.NewString()
+	}
+	now := time.Now().UTC()
+
+	// Delete any existing row then insert (upsert).
+	_, _ = s.db.ExecContext(ctx, "DELETE FROM xc_credentials")
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO xc_credentials (id, tenant, api_token, namespace, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		creds.ID, creds.Tenant, creds.APIToken, creds.Namespace, now, now,
+	)
+	return err
+}
+
+// DeleteXCCredentials removes stored XC credentials.
+func (s *SQLiteStore) DeleteXCCredentials(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM xc_credentials")
+	return err
+}
+
 const sqliteSchema = `
 CREATE TABLE IF NOT EXISTS audit_log (
 	id TEXT PRIMARY KEY,
@@ -311,5 +346,14 @@ CREATE TABLE IF NOT EXISTS cluster_groups (
 	description TEXT NOT NULL DEFAULT '',
 	cluster_names TEXT NOT NULL DEFAULT '[]',
 	created_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS xc_credentials (
+	id TEXT PRIMARY KEY,
+	tenant TEXT NOT NULL,
+	api_token TEXT NOT NULL,
+	namespace TEXT NOT NULL DEFAULT 'default',
+	created_at DATETIME NOT NULL,
+	updated_at DATETIME NOT NULL
 );
 `
