@@ -1,4 +1,4 @@
-.PHONY: all build test lint dev clean docker-build docker-push helm-package helm-install helm-template build-agent-heartbeat docker-build-agent-heartbeat docker-build-agent helm-package-agent
+.PHONY: all build test lint dev clean docker-build docker-push helm-package helm-install helm-template build-agent-heartbeat docker-build-agent-heartbeat docker-build-agent helm-package-agent ci test-coverage helm-lint
 
 VERSION ?= 0.1.0
 REGISTRY ?= danny2guns
@@ -94,7 +94,7 @@ helm-template:
 test: test-frontend test-api test-operator test-migration-cli
 
 test-frontend:
-	cd frontend && pnpm test
+	cd frontend && pnpm test:run
 
 test-api:
 	cd api && go test ./...
@@ -118,6 +118,26 @@ lint-go:
 	cd api && golangci-lint run ./...
 	cd operator && golangci-lint run ./...
 	cd migration-cli && golangci-lint run ./...
+
+# ──────────────────────────────────────────────
+# CI
+# ──────────────────────────────────────────────
+
+ci: lint test build helm-lint
+
+test-coverage: test-coverage-go test-coverage-frontend
+
+test-coverage-go:
+	cd api && go test -coverprofile=coverage.out ./...
+	cd api && go tool cover -func=coverage.out
+	cd operator && go test -coverprofile=coverage.out ./...
+	cd operator && go tool cover -func=coverage.out
+
+test-coverage-frontend:
+	cd frontend && pnpm test:run --coverage
+
+helm-lint:
+	helm lint deploy/helm/ngf-console
 
 # ──────────────────────────────────────────────
 # Generate
