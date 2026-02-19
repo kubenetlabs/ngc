@@ -27,7 +27,7 @@ const navItems = [
   { to: "/certificates", label: "Certificates", icon: KeyRound },
   { to: "/observability", label: "Observability", icon: BarChart3 },
   { to: "/diagnostics", label: "Diagnostics", icon: Wrench },
-  { to: "/xc", label: "Distributed Cloud", icon: Cloud, enterprise: true },
+  { to: "/xc", label: "Distributed Cloud", icon: Cloud },
   { to: "/coexistence", label: "Coexistence", icon: GitFork },
   { to: "/migration", label: "Migration", icon: ArrowRightLeft },
   { to: "/audit", label: "Audit Log", icon: ScrollText },
