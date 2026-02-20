@@ -402,8 +402,8 @@ func (s *Server) mountResourceRoutes(
 		r.Get("/publishes", xc.ListPublishes)
 		r.Post("/publish", xc.Publish)
 		r.Post("/preview", xc.Preview)
-		r.Get("/publish/{id}", xc.GetPublish)
-		r.Delete("/publish/{id}", xc.DeletePublish)
+		r.Get("/publish/{namespace}/{name}", xc.GetPublish)
+		r.Delete("/publish/{namespace}/{name}", xc.DeletePublish)
 
 		// WAF policies
 		r.Get("/waf-policies", xc.ListWAFPolicies)

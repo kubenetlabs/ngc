@@ -1,16 +1,20 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/dynamic"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
@@ -44,23 +48,25 @@ type XCPublishRequest struct {
 	OriginAddress    string                 `json:"originAddress,omitempty"`
 	WAFEnabled       bool                   `json:"wafEnabled,omitempty"`
 	WAFPolicyName    string                 `json:"wafPolicyName,omitempty"`
+	WebSocketEnabled bool                   `json:"webSocketEnabled,omitempty"`
 	DistributedCloud map[string]interface{} `json:"distributedCloud,omitempty"`
 }
 
 // XCPublishResponse represents a DistributedCloudPublish resource response.
 type XCPublishResponse struct {
-	Name               string `json:"name"`
-	Namespace          string `json:"namespace"`
-	HTTPRouteRef       string `json:"httpRouteRef"`
-	InferencePoolRef   string `json:"inferencePoolRef,omitempty"`
-	Phase              string `json:"phase"`
-	XCLoadBalancerName string `json:"xcLoadBalancerName,omitempty"`
-	XCOriginPoolName   string `json:"xcOriginPoolName,omitempty"`
-	XCVirtualIP        string `json:"xcVirtualIP,omitempty"`
-	XCDNS              string `json:"xcDNS,omitempty"`
-	WAFPolicyAttached  string `json:"wafPolicyAttached,omitempty"`
-	LastSyncedAt       string `json:"lastSyncedAt,omitempty"`
-	CreatedAt          string `json:"createdAt"`
+	Name               string   `json:"name"`
+	Namespace          string   `json:"namespace"`
+	HTTPRouteRef       string   `json:"httpRouteRef"`
+	InferencePoolRef   string   `json:"inferencePoolRef,omitempty"`
+	Phase              string   `json:"phase"`
+	XCLoadBalancerName string   `json:"xcLoadBalancerName,omitempty"`
+	XCOriginPoolName   string   `json:"xcOriginPoolName,omitempty"`
+	XCVirtualIP        string   `json:"xcVirtualIP,omitempty"`
+	XCDNS              string   `json:"xcDNS,omitempty"`
+	WAFPolicyAttached  string   `json:"wafPolicyAttached,omitempty"`
+	LastSyncedAt       string   `json:"lastSyncedAt,omitempty"`
+	CreatedAt          string   `json:"createdAt"`
+	Errors             []string `json:"errors,omitempty"`
 }
 
 // XCMetricsResponse represents cross-cluster traffic metrics.
@@ -100,12 +106,13 @@ type XCTestConnectionResponse struct {
 
 // XCPreviewRequest represents a request to preview an XC publish configuration.
 type XCPreviewRequest struct {
-	Namespace      string `json:"namespace"`
-	HTTPRouteRef   string `json:"httpRouteRef"`
-	PublicHostname string `json:"publicHostname,omitempty"`
-	OriginAddress  string `json:"originAddress,omitempty"`
-	WAFEnabled     bool   `json:"wafEnabled,omitempty"`
-	WAFPolicyName  string `json:"wafPolicyName,omitempty"`
+	Namespace        string `json:"namespace"`
+	HTTPRouteRef     string `json:"httpRouteRef"`
+	PublicHostname   string `json:"publicHostname,omitempty"`
+	OriginAddress    string `json:"originAddress,omitempty"`
+	WAFEnabled       bool   `json:"wafEnabled,omitempty"`
+	WAFPolicyName    string `json:"wafPolicyName,omitempty"`
+	WebSocketEnabled bool   `json:"webSocketEnabled,omitempty"`
 }
 
 // XCPreviewResponse represents the derived XC configuration for review.
@@ -341,13 +348,20 @@ func (h *XCHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build the preview using the mapper.
+	xcTenant := ""
+	if creds != nil {
+		xcTenant = creds.Tenant
+	}
+
 	opts := xc.MapOptions{
-		XCNamespace:    xcNamespace,
-		PublicHostname: req.PublicHostname,
-		WAFEnabled:     req.WAFEnabled,
-		WAFPolicyName:  req.WAFPolicyName,
-		OriginPort:     80,
-		OriginTLS:      false,
+		XCNamespace:      xcNamespace,
+		Tenant:           xcTenant,
+		PublicHostname:   req.PublicHostname,
+		WAFEnabled:       req.WAFEnabled,
+		WAFPolicyName:    req.WAFPolicyName,
+		WebSocketEnabled: req.WebSocketEnabled,
+		OriginPort:       80,
+		OriginTLS:        false,
 	}
 
 	// Detect port and TLS from Gateway listeners.
@@ -388,7 +402,7 @@ func (h *XCHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	if req.WAFEnabled {
 		policyName := req.WAFPolicyName
 		if policyName == "" {
-			policyName = "ngf-default-waf"
+			policyName = "default"
 		}
 		preview.WAFPolicy = &policyName
 	}
@@ -443,15 +457,24 @@ func (h *XCHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	if req.WAFEnabled {
 		policyName := req.WAFPolicyName
 		if policyName == "" {
-			policyName = "ngf-default-waf"
+			policyName = "default"
 		}
 		req.DistributedCloud["wafPolicy"] = policyName
 	}
 
-	// Create the CRD object in K8s.
+	// Create or update the CRD object in K8s.
 	obj := toXCPublishUnstructured(req)
 	created, err := dc.Resource(distributedCloudPublishGVR).Namespace(req.Namespace).Create(r.Context(), obj, metav1.CreateOptions{})
-	if err != nil {
+	if k8serrors.IsAlreadyExists(err) {
+		// CRD already exists — fetch the existing one and re-publish XC resources.
+		slog.Info("CRD already exists, re-publishing XC resources", "name", req.Name, "namespace", req.Namespace)
+		existing, getErr := dc.Resource(distributedCloudPublishGVR).Namespace(req.Namespace).Get(r.Context(), req.Name, metav1.GetOptions{})
+		if getErr != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("fetching existing distributedcloudpublish: %v", getErr))
+			return
+		}
+		created = existing
+	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("creating distributedcloudpublish: %v", err))
 		return
 	}
@@ -459,12 +482,14 @@ func (h *XCHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	resp := toXCPublishResponse(created)
 
 	// Attempt to create XC resources via the XC API.
+	var xcErrors []string
 	if creds != nil {
 		xcClient := xc.New(creds.Tenant, creds.APIToken)
 
 		// Fetch the HTTPRoute to derive config.
 		route, routeErr := k8s.GetHTTPRoute(r.Context(), req.Namespace, req.HTTPRouteRef)
 		if routeErr != nil {
+			xcErrors = append(xcErrors, fmt.Sprintf("Could not fetch HTTPRoute: %v", routeErr))
 			slog.Warn("could not fetch HTTPRoute for XC publish", "error", routeErr)
 		} else {
 			// Determine gateway address.
@@ -498,12 +523,14 @@ func (h *XCHandler) Publish(w http.ResponseWriter, r *http.Request) {
 
 			xcNs := creds.Namespace
 			opts := xc.MapOptions{
-				XCNamespace:    xcNs,
-				PublicHostname: req.PublicHostname,
-				WAFEnabled:     req.WAFEnabled,
-				WAFPolicyName:  req.WAFPolicyName,
-				OriginPort:     originPort,
-				OriginTLS:      originTLS,
+				XCNamespace:      xcNs,
+				Tenant:           creds.Tenant,
+				PublicHostname:   req.PublicHostname,
+				WAFEnabled:       req.WAFEnabled,
+				WAFPolicyName:    req.WAFPolicyName,
+				WebSocketEnabled: req.WebSocketEnabled,
+				OriginPort:       originPort,
+				OriginTLS:        originTLS,
 			}
 
 			// Allow origin address override (e.g. when local hostname differs from public IP).
@@ -512,34 +539,83 @@ func (h *XCHandler) Publish(w http.ResponseWriter, r *http.Request) {
 				publishOriginAddr = req.OriginAddress
 			}
 
-			// Create origin pool.
+			// Create or replace origin pool.
 			pool := xc.BuildOriginPool(req.HTTPRouteRef, publishOriginAddr, originPort, originTLS)
 			_, poolErr := xcClient.CreateOriginPool(r.Context(), xcNs, *pool)
 			if poolErr != nil {
-				slog.Warn("failed to create XC origin pool", "error", poolErr)
+				// Try replace if create failed (likely already exists).
+				_, replaceErr := xcClient.ReplaceOriginPool(r.Context(), xcNs, *pool)
+				if replaceErr != nil {
+					xcErrors = append(xcErrors, fmt.Sprintf("Origin pool: %v (replace also failed: %v)", poolErr, replaceErr))
+					slog.Warn("failed to create/replace XC origin pool", "createErr", poolErr, "replaceErr", replaceErr)
+				} else {
+					resp.XCOriginPoolName = pool.Metadata.Name
+					slog.Info("replaced existing XC origin pool", "name", pool.Metadata.Name)
+				}
 			} else {
 				resp.XCOriginPoolName = pool.Metadata.Name
 				slog.Info("created XC origin pool", "name", pool.Metadata.Name)
 			}
 
-			// Create HTTP LB.
+			// Create or replace HTTP LB.
 			lb := xc.MapHTTPRouteToLoadBalancer(route, publishOriginAddr, opts)
 			_, lbErr := xcClient.CreateHTTPLoadBalancer(r.Context(), xcNs, *lb)
 			if lbErr != nil {
-				slog.Warn("failed to create XC HTTP load balancer", "error", lbErr)
+				// Try replace if create failed (likely already exists).
+				_, replaceErr := xcClient.ReplaceHTTPLoadBalancer(r.Context(), xcNs, *lb)
+				if replaceErr != nil {
+					xcErrors = append(xcErrors, fmt.Sprintf("HTTP Load Balancer: %v (replace also failed: %v)", lbErr, replaceErr))
+					slog.Warn("failed to create/replace XC HTTP load balancer", "createErr", lbErr, "replaceErr", replaceErr)
+				} else {
+					resp.XCLoadBalancerName = lb.Metadata.Name
+					slog.Info("replaced existing XC HTTP load balancer", "name", lb.Metadata.Name)
+				}
 			} else {
 				resp.XCLoadBalancerName = lb.Metadata.Name
 				slog.Info("created XC HTTP load balancer", "name", lb.Metadata.Name)
 			}
 
+			// After creating/replacing the LB, fetch it back from XC to discover
+			// the auto-generated CNAME (ves-io-*.ac.vh.ves.io) and add it to the
+			// domains list so the LB responds on that hostname.
+			if resp.XCLoadBalancerName != "" {
+				h.addXCAutoDomain(r.Context(), xcClient, xcNs, lb)
+			}
+
 			if req.WAFEnabled {
 				policyName := req.WAFPolicyName
 				if policyName == "" {
-					policyName = "ngf-default-waf"
+					policyName = "default"
 				}
 				resp.WAFPolicyAttached = policyName
 			}
 		}
+	}
+
+	// Update CRD status based on XC API results.
+	phase := "Published"
+	if len(xcErrors) > 0 {
+		phase = "Error"
+		resp.Errors = xcErrors
+	}
+	resp.Phase = phase
+	resp.LastSyncedAt = time.Now().UTC().Format(time.RFC3339)
+
+	statusPatch := map[string]any{
+		"status": map[string]any{
+			"phase":              phase,
+			"xcLoadBalancerName": resp.XCLoadBalancerName,
+			"xcOriginPoolName":   resp.XCOriginPoolName,
+			"wafPolicyAttached":  resp.WAFPolicyAttached,
+			"lastSyncedAt":       resp.LastSyncedAt,
+		},
+	}
+	patchBytes, _ := json.Marshal(statusPatch)
+	_, patchErr := dc.Resource(distributedCloudPublishGVR).Namespace(req.Namespace).Patch(
+		r.Context(), req.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
+	)
+	if patchErr != nil {
+		slog.Warn("failed to patch CRD status", "error", patchErr)
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -566,7 +642,7 @@ func (h *XCHandler) ListPublishes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// GetPublish returns a specific publication by ID.
+// GetPublish returns a specific publication by namespace and name.
 func (h *XCHandler) GetPublish(w http.ResponseWriter, r *http.Request) {
 	dc := h.getDynamicClient(r)
 	if dc == nil {
@@ -574,7 +650,8 @@ func (h *XCHandler) GetPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ns, name := parsePublishID(chi.URLParam(r, "id"))
+	ns := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
 
 	obj, err := dc.Resource(distributedCloudPublishGVR).Namespace(ns).Get(r.Context(), name, metav1.GetOptions{})
 	if err != nil {
@@ -593,12 +670,14 @@ func (h *XCHandler) DeletePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ns, name := parsePublishID(chi.URLParam(r, "id"))
+	ns := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
 
 	// Attempt to clean up XC resources before deleting the CRD.
+	var warnings []string
 	obj, getErr := dc.Resource(distributedCloudPublishGVR).Namespace(ns).Get(r.Context(), name, metav1.GetOptions{})
 	if getErr == nil {
-		h.cleanupXCResources(r, obj)
+		warnings = h.cleanupXCResources(r, obj)
 	}
 
 	err := dc.Resource(distributedCloudPublishGVR).Namespace(ns).Delete(r.Context(), name, metav1.DeleteOptions{})
@@ -607,22 +686,32 @@ func (h *XCHandler) DeletePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	resp := map[string]any{
 		"message":   "distributedcloudpublish deleted",
 		"name":      name,
 		"namespace": ns,
-	})
+	}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // cleanupXCResources deletes XC HTTP LB and origin pool resources for a publish.
-func (h *XCHandler) cleanupXCResources(r *http.Request, obj *unstructured.Unstructured) {
+// Returns a list of warnings for any cleanup failures.
+func (h *XCHandler) cleanupXCResources(r *http.Request, obj *unstructured.Unstructured) []string {
+	var warnings []string
+
 	creds, err := h.Store.GetXCCredentials(r.Context())
 	if err != nil || creds == nil {
-		return
+		return warnings
 	}
 
 	xcClient := xc.New(creds.Tenant, creds.APIToken)
 	xcNs := creds.Namespace
+
+	deletedLB := false
+	deletedPool := false
 
 	// Read the XC resource names from status.
 	status, _, _ := unstructured.NestedMap(obj.Object, "status")
@@ -630,8 +719,10 @@ func (h *XCHandler) cleanupXCResources(r *http.Request, obj *unstructured.Unstru
 		lbName, _, _ := unstructured.NestedString(status, "xcLoadBalancerName")
 		if lbName != "" {
 			if err := xcClient.DeleteHTTPLoadBalancer(r.Context(), xcNs, lbName); err != nil {
+				warnings = append(warnings, fmt.Sprintf("Failed to delete XC HTTP LB %q: %v", lbName, err))
 				slog.Warn("failed to delete XC HTTP LB on cleanup", "name", lbName, "error", err)
 			} else {
+				deletedLB = true
 				slog.Info("deleted XC HTTP LB", "name", lbName)
 			}
 		}
@@ -639,24 +730,38 @@ func (h *XCHandler) cleanupXCResources(r *http.Request, obj *unstructured.Unstru
 		poolName, _, _ := unstructured.NestedString(status, "xcOriginPoolName")
 		if poolName != "" {
 			if err := xcClient.DeleteOriginPool(r.Context(), xcNs, poolName); err != nil {
+				warnings = append(warnings, fmt.Sprintf("Failed to delete XC origin pool %q: %v", poolName, err))
 				slog.Warn("failed to delete XC origin pool on cleanup", "name", poolName, "error", err)
 			} else {
+				deletedPool = true
 				slog.Info("deleted XC origin pool", "name", poolName)
 			}
 		}
 	}
 
 	// Fall back to name-based convention if status fields not set.
-	spec, _, _ := unstructured.NestedMap(obj.Object, "spec")
-	if spec != nil {
-		httpRouteRef, _, _ := unstructured.NestedString(spec, "httpRouteRef")
-		if httpRouteRef != "" {
-			lbName := "ngf-" + httpRouteRef
-			poolName := "ngf-" + httpRouteRef + "-pool"
-			_ = xcClient.DeleteHTTPLoadBalancer(r.Context(), xcNs, lbName)
-			_ = xcClient.DeleteOriginPool(r.Context(), xcNs, poolName)
+	if !deletedLB || !deletedPool {
+		spec, _, _ := unstructured.NestedMap(obj.Object, "spec")
+		if spec != nil {
+			httpRouteRef, _, _ := unstructured.NestedString(spec, "httpRouteRef")
+			if httpRouteRef != "" {
+				if !deletedLB {
+					lbName := "ngf-" + httpRouteRef
+					if err := xcClient.DeleteHTTPLoadBalancer(r.Context(), xcNs, lbName); err != nil {
+						slog.Warn("failed to delete XC HTTP LB by convention", "name", lbName, "error", err)
+					}
+				}
+				if !deletedPool {
+					poolName := "ngf-" + httpRouteRef + "-pool"
+					if err := xcClient.DeleteOriginPool(r.Context(), xcNs, poolName); err != nil {
+						slog.Warn("failed to delete XC origin pool by convention", "name", poolName, "error", err)
+					}
+				}
+			}
 		}
 	}
+
+	return warnings
 }
 
 // --- WAF ---
@@ -691,6 +796,71 @@ func (h *XCHandler) ListWAFPolicies(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// addXCAutoDomain fetches the LB from XC, looks for the auto-generated CNAME
+// (e.g. ves-io-{uuid}.ac.vh.ves.io), and adds it to the LB's domains list
+// so the LB responds on that hostname. This is a best-effort operation.
+func (h *XCHandler) addXCAutoDomain(ctx context.Context, xcClient *xc.Client, xcNs string, lb *xc.HTTPLoadBalancer) {
+	raw, err := xcClient.GetHTTPLoadBalancerRaw(ctx, xcNs, lb.Metadata.Name)
+	if err != nil {
+		slog.Warn("could not fetch LB to discover auto CNAME", "error", err)
+		return
+	}
+
+	// The auto-generated CNAME is typically in spec.auto_cert_info.dns_records
+	// or in the status/system_metadata. Search the raw JSON for ves.io hostnames.
+	autoDomain := findVesDomain(raw)
+	if autoDomain == "" {
+		slog.Info("no auto-generated ves.io domain found in LB response")
+		return
+	}
+
+	// Check if already in domains list.
+	for _, d := range lb.Spec.Domains {
+		if d == autoDomain {
+			return
+		}
+	}
+
+	// Add the auto domain and update the LB.
+	lb.Spec.Domains = append(lb.Spec.Domains, autoDomain)
+	_, err = xcClient.ReplaceHTTPLoadBalancer(ctx, xcNs, *lb)
+	if err != nil {
+		slog.Warn("could not update LB with auto CNAME domain", "domain", autoDomain, "error", err)
+	} else {
+		slog.Info("added XC auto CNAME to LB domains", "domain", autoDomain)
+	}
+}
+
+// findVesDomain recursively searches a map for a string value containing ".vh.ves.io".
+func findVesDomain(data map[string]any) string {
+	for _, v := range data {
+		switch val := v.(type) {
+		case string:
+			if strings.Contains(val, ".vh.ves.io") {
+				return val
+			}
+		case map[string]any:
+			if result := findVesDomain(val); result != "" {
+				return result
+			}
+		case []any:
+			for _, item := range val {
+				if m, ok := item.(map[string]any); ok {
+					if result := findVesDomain(m); result != "" {
+						return result
+					}
+				}
+				if s, ok := item.(string); ok {
+					if strings.Contains(s, ".vh.ves.io") {
+						return s
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // --- Helpers ---

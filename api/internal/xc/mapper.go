@@ -10,11 +10,14 @@ import (
 // MapOptions controls how an HTTPRoute is mapped to an XC HTTP Load Balancer.
 type MapOptions struct {
 	XCNamespace    string // target XC namespace
+	Tenant         string // XC tenant name for resource references
 	PublicHostname string // override hostname for edge (optional)
 	WAFEnabled     bool   // whether to attach WAF
 	WAFPolicyName  string // specific WAF policy to use (or empty for default)
 	OriginPort     int32  // port to use for origin pool
 	OriginTLS      bool   // whether origin uses TLS
+	OriginHostRewrite string // hostname to set as Host header when forwarding to origin
+	WebSocketEnabled  bool   // whether to enable WebSocket protocol upgrade on routes
 }
 
 // MapHTTPRouteToLoadBalancer derives an XC HTTP Load Balancer configuration from a Gateway API HTTPRoute.
@@ -43,11 +46,21 @@ func MapHTTPRouteToLoadBalancer(route *gatewayv1.HTTPRoute, gatewayAddress strin
 		domains = append(domains, name+".example.com")
 	}
 
+
+
 	// Build origin pool reference.
+	// Note: tenant is omitted — XC resolves references within the same tenant context.
 	poolName := name + "-pool"
 	poolRef := PoolRef{
 		Namespace: opts.XCNamespace,
 		Name:      poolName,
+	}
+
+	// Determine the host rewrite value — use the first HTTPRoute hostname so
+	// XC sends the correct Host header to the origin (NGINX Gateway).
+	hostRewrite := opts.OriginHostRewrite
+	if hostRewrite == "" && len(route.Spec.Hostnames) > 0 {
+		hostRewrite = string(route.Spec.Hostnames[0])
 	}
 
 	// Build routes from HTTPRoute rules.
@@ -77,27 +90,43 @@ func MapHTTPRouteToLoadBalancer(route *gatewayv1.HTTPRoute, gatewayAddress strin
 				method = string(*match.Method)
 			}
 
-			routes = append(routes, Route{
-				SimpleRoute: &SimpleRoute{
-					HTTPMethod: method,
-					Path:       pathMatch,
-					OriginPools: []RoutePool{
-						{Pool: poolRef, Weight: 1},
-					},
+			sr := &SimpleRoute{
+				HTTPMethod: method,
+				Path:       pathMatch,
+				OriginPools: []RoutePool{
+					{Pool: poolRef, Weight: 1},
 				},
-			})
+			}
+			if hostRewrite != "" {
+				sr.HostRewrite = hostRewrite
+			}
+			if opts.WebSocketEnabled {
+				sr.AdvancedOptions = &RouteSimpleAdvancedOptions{
+					WebSocketConfig: &WebSocketConfig{UseWebSocket: true},
+				}
+			}
+
+			routes = append(routes, Route{SimpleRoute: sr})
 		}
 
 		// If a rule has no matches, it matches everything.
 		if len(rule.Matches) == 0 {
-			routes = append(routes, Route{
-				SimpleRoute: &SimpleRoute{
-					Path: PathMatch{Prefix: "/"},
-					OriginPools: []RoutePool{
-						{Pool: poolRef, Weight: 1},
-					},
+			sr := &SimpleRoute{
+				Path: PathMatch{Prefix: "/"},
+				OriginPools: []RoutePool{
+					{Pool: poolRef, Weight: 1},
 				},
-			})
+			}
+			if hostRewrite != "" {
+				sr.HostRewrite = hostRewrite
+			}
+			if opts.WebSocketEnabled {
+				sr.AdvancedOptions = &RouteSimpleAdvancedOptions{
+					WebSocketConfig: &WebSocketConfig{UseWebSocket: true},
+				}
+			}
+
+			routes = append(routes, Route{SimpleRoute: sr})
 		}
 	}
 
@@ -107,49 +136,50 @@ func MapHTTPRouteToLoadBalancer(route *gatewayv1.HTTPRoute, gatewayAddress strin
 			Namespace: opts.XCNamespace,
 		},
 		Spec: HTTPLoadBalancerSpec{
-			Domains: domains,
-			AdvertiseOnPublic: &AdvertiseOnPublic{
-				DefaultVIP: true,
-			},
+			Domains:                     domains,
+			AdvertiseOnPublicDefaultVIP: &EmptyObject{},
 			DefaultRoutePools: []RoutePool{
 				{Pool: poolRef, Weight: 1},
 			},
 		},
 	}
 
-	// Add explicit routes if there are path-specific rules.
+	// Always add routes when host_rewrite or WebSocket is set, since these are
+	// route-level settings in XC. Without explicit routes, XC uses default_route_pools
+	// which doesn't support host rewrite or WebSocket config.
 	if len(routes) > 0 {
-		hasNonDefault := false
-		for _, rt := range routes {
-			if rt.SimpleRoute != nil && (rt.SimpleRoute.Path.Exact != "" || rt.SimpleRoute.Path.Regex != "" ||
-				(rt.SimpleRoute.Path.Prefix != "" && rt.SimpleRoute.Path.Prefix != "/") ||
-				rt.SimpleRoute.HTTPMethod != "") {
-				hasNonDefault = true
-				break
-			}
-		}
-		if hasNonDefault {
+		if hostRewrite != "" || opts.WebSocketEnabled {
+			// Must use routes (not default_route_pools) so route-level settings apply.
 			lb.Spec.Routes = routes
+		} else {
+			hasNonDefault := false
+			for _, rt := range routes {
+				if rt.SimpleRoute != nil && (rt.SimpleRoute.Path.Exact != "" || rt.SimpleRoute.Path.Regex != "" ||
+					(rt.SimpleRoute.Path.Prefix != "" && rt.SimpleRoute.Path.Prefix != "/") ||
+					rt.SimpleRoute.HTTPMethod != "") {
+					hasNonDefault = true
+					break
+				}
+			}
+			if hasNonDefault {
+				lb.Spec.Routes = routes
+			}
 		}
 	}
 
-	// Configure TLS: if origin uses TLS, set up HTTPS auto-cert; otherwise use HTTP.
-	if opts.OriginTLS {
-		lb.Spec.HTTPSAutoType = &HTTPSAutoType{HTTPRedirect: true}
-	} else {
-		port := uint32(80)
-		lb.Spec.HTTPListenPort = &port
-		lb.Spec.HTTP = &HTTPConfig{
-			DNSVolterraManaged: true,
-			Port:               port,
-		}
+	// Use HTTP type for the LB. The XC auto-generated CNAME will be added
+	// to the domains list after creation via a GET+PUT cycle in the handler.
+	port := uint32(80)
+	lb.Spec.HTTPListenPort = &port
+	lb.Spec.HTTP = &HTTPConfig{
+		Port: port,
 	}
 
 	// Attach WAF if enabled.
 	if opts.WAFEnabled {
 		policyName := opts.WAFPolicyName
 		if policyName == "" {
-			policyName = "ngf-default-waf"
+			policyName = "default"
 		}
 		lb.Spec.AppFirewall = &AppFirewallRef{
 			Namespace: opts.XCNamespace,

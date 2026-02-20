@@ -25,7 +25,7 @@ func New(tenant, apiToken string) *Client {
 		apiToken: apiToken,
 		baseURL:  fmt.Sprintf("https://%s.console.ves.volterra.io/api", tenant),
 		http: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 60 * time.Second,
 		},
 	}
 }
@@ -115,6 +115,16 @@ func (c *Client) CreateHTTPLoadBalancer(ctx context.Context, namespace string, l
 	return decodeResponse[HTTPLoadBalancer](resp)
 }
 
+// ReplaceHTTPLoadBalancer replaces (updates) an existing HTTP Load Balancer.
+func (c *Client) ReplaceHTTPLoadBalancer(ctx context.Context, namespace string, lb HTTPLoadBalancer) (*HTTPLoadBalancer, error) {
+	path := fmt.Sprintf("/config/namespaces/%s/http_loadbalancers/%s", namespace, lb.Metadata.Name)
+	resp, err := c.do(ctx, http.MethodPut, path, lb)
+	if err != nil {
+		return nil, fmt.Errorf("replacing HTTP load balancer: %w", err)
+	}
+	return decodeResponse[HTTPLoadBalancer](resp)
+}
+
 // GetHTTPLoadBalancer retrieves an HTTP Load Balancer by name.
 func (c *Client) GetHTTPLoadBalancer(ctx context.Context, namespace, name string) (*HTTPLoadBalancer, error) {
 	path := fmt.Sprintf("/config/namespaces/%s/http_loadbalancers/%s", namespace, name)
@@ -123,6 +133,20 @@ func (c *Client) GetHTTPLoadBalancer(ctx context.Context, namespace, name string
 		return nil, fmt.Errorf("getting HTTP load balancer: %w", err)
 	}
 	return decodeResponse[HTTPLoadBalancer](resp)
+}
+
+// GetHTTPLoadBalancerRaw retrieves an HTTP Load Balancer as raw JSON to inspect all fields.
+func (c *Client) GetHTTPLoadBalancerRaw(ctx context.Context, namespace, name string) (map[string]any, error) {
+	path := fmt.Sprintf("/config/namespaces/%s/http_loadbalancers/%s", namespace, name)
+	resp, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("getting HTTP load balancer raw: %w", err)
+	}
+	result, err := decodeResponse[map[string]any](resp)
+	if err != nil {
+		return nil, err
+	}
+	return *result, nil
 }
 
 // DeleteHTTPLoadBalancer deletes an HTTP Load Balancer by name.
@@ -147,6 +171,16 @@ func (c *Client) CreateOriginPool(ctx context.Context, namespace string, pool Or
 	resp, err := c.do(ctx, http.MethodPost, path, pool)
 	if err != nil {
 		return nil, fmt.Errorf("creating origin pool: %w", err)
+	}
+	return decodeResponse[OriginPoolConfig](resp)
+}
+
+// ReplaceOriginPool replaces (updates) an existing origin pool.
+func (c *Client) ReplaceOriginPool(ctx context.Context, namespace string, pool OriginPoolConfig) (*OriginPoolConfig, error) {
+	path := fmt.Sprintf("/config/namespaces/%s/origin_pools/%s", namespace, pool.Metadata.Name)
+	resp, err := c.do(ctx, http.MethodPut, path, pool)
+	if err != nil {
+		return nil, fmt.Errorf("replacing origin pool: %w", err)
 	}
 	return decodeResponse[OriginPoolConfig](resp)
 }

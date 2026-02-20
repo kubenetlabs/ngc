@@ -20,10 +20,10 @@ type HTTPLoadBalancerSpec struct {
 	HTTP               *HTTPConfig         `json:"http,omitempty"`
 	DefaultRoutePools  []RoutePool         `json:"default_route_pools,omitempty"`
 	Routes             []Route             `json:"routes,omitempty"`
-	AppFirewall        *AppFirewallRef     `json:"app_firewall,omitempty"`
-	DisableWAF         *EmptyObject        `json:"disable_waf,omitempty"`
-	AdvertiseOnPublic  *AdvertiseOnPublic  `json:"advertise_on_public,omitempty"`
-	DefaultPool        *OriginPoolWithWeight `json:"default_pool,omitempty"`
+	AppFirewall                    *AppFirewallRef       `json:"app_firewall,omitempty"`
+	DisableWAF                     *EmptyObject          `json:"disable_waf,omitempty"`
+	AdvertiseOnPublicDefaultVIP    *EmptyObject          `json:"advertise_on_public_default_vip,omitempty"`
+	DefaultPool                    *OriginPoolWithWeight `json:"default_pool,omitempty"`
 }
 
 // EmptyObject is used for XC API fields that take an empty object to indicate a setting.
@@ -61,9 +61,23 @@ type Route struct {
 
 // SimpleRoute is a basic route with path match and origin pools.
 type SimpleRoute struct {
-	HTTPMethod string      `json:"http_method,omitempty"`
-	Path       PathMatch   `json:"path"`
-	OriginPools []RoutePool `json:"origin_pools,omitempty"`
+	HTTPMethod      string                      `json:"http_method,omitempty"`
+	Path            PathMatch                   `json:"path"`
+	OriginPools     []RoutePool                 `json:"origin_pools,omitempty"`
+	HostRewrite     string                      `json:"host_rewrite,omitempty"`
+	AutoHostRewrite *EmptyObject                `json:"auto_host_rewrite,omitempty"`
+	AdvancedOptions *RouteSimpleAdvancedOptions `json:"advanced_options,omitempty"`
+}
+
+// RouteSimpleAdvancedOptions holds advanced route settings including WebSocket config.
+type RouteSimpleAdvancedOptions struct {
+	WebSocketConfig        *WebSocketConfig `json:"web_socket_config,omitempty"`
+	DisableWebSocketConfig *EmptyObject     `json:"disable_web_socket_config,omitempty"`
+}
+
+// WebSocketConfig enables WebSocket protocol upgrade on a route.
+type WebSocketConfig struct {
+	UseWebSocket bool `json:"use_websocket,omitempty"`
 }
 
 // PathMatch defines path matching criteria.
@@ -78,11 +92,6 @@ type AppFirewallRef struct {
 	Tenant    string `json:"tenant,omitempty"`
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
-}
-
-// AdvertiseOnPublic configures public advertisement of the LB.
-type AdvertiseOnPublic struct {
-	DefaultVIP bool `json:"default_vip,omitempty"`
 }
 
 // OriginPoolWithWeight references origin pools in the default route.

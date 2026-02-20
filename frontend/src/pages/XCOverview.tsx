@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useActiveCluster } from "@/hooks/useActiveCluster";
 import { fetchHTTPRoutes } from "@/api/routes";
@@ -40,6 +40,11 @@ function statusBadge(status: string): string {
 
 type WizardStep = "select" | "configure" | "review";
 
+interface StatusMessage {
+  type: "success" | "warning" | "error";
+  text: string;
+}
+
 export default function XCOverview() {
   const activeCluster = useActiveCluster();
   const queryClient = useQueryClient();
@@ -53,7 +58,23 @@ export default function XCOverview() {
   const [originAddress, setOriginAddress] = useState("");
   const [wafEnabled, setWafEnabled] = useState(false);
   const [wafPolicyName, setWafPolicyName] = useState("");
+  const [webSocketEnabled, setWebSocketEnabled] = useState(false);
   const [preview, setPreview] = useState<XCPreviewResponse | null>(null);
+
+  // Status message state
+  const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(
+    null
+  );
+
+  // Auto-dismiss success messages after 8 seconds
+  useEffect(() => {
+    if (statusMessage && statusMessage.type === "success") {
+      const timer = setTimeout(() => setStatusMessage(null), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [statusMessage]);
+
+  const dismissMessage = useCallback(() => setStatusMessage(null), []);
 
   // Queries
   const { data: statusData } = useQuery({
@@ -95,14 +116,37 @@ export default function XCOverview() {
       setPreview(data);
       setWizardStep("review");
     },
+    onError: (error) => {
+      setStatusMessage({
+        type: "error",
+        text: `Preview failed: ${String(error)}`,
+      });
+    },
   });
 
   const publishMutation = useMutation({
     mutationFn: publishToXC,
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["xc-publishes"] });
       queryClient.invalidateQueries({ queryKey: ["xc-status"] });
       resetWizard();
+      if (data.errors && data.errors.length > 0) {
+        setStatusMessage({
+          type: "warning",
+          text: `Published with warnings: ${data.errors.join("; ")}`,
+        });
+      } else {
+        setStatusMessage({
+          type: "success",
+          text: "Successfully published to F5 Distributed Cloud.",
+        });
+      }
+    },
+    onError: (error) => {
+      setStatusMessage({
+        type: "error",
+        text: `Publish failed: ${String(error)}`,
+      });
     },
   });
 
@@ -111,6 +155,16 @@ export default function XCOverview() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["xc-publishes"] });
       queryClient.invalidateQueries({ queryKey: ["xc-status"] });
+      setStatusMessage({
+        type: "success",
+        text: "Publish deleted successfully. XC resources have been cleaned up.",
+      });
+    },
+    onError: (error) => {
+      setStatusMessage({
+        type: "error",
+        text: `Delete failed: ${String(error)}`,
+      });
     },
   });
 
@@ -123,6 +177,7 @@ export default function XCOverview() {
     setOriginAddress("");
     setWafEnabled(false);
     setWafPolicyName("");
+    setWebSocketEnabled(false);
     setPreview(null);
   };
 
@@ -137,6 +192,7 @@ export default function XCOverview() {
 
   const handlePreview = () => {
     if (!selectedRoute) return;
+    setStatusMessage(null);
     previewMutation.mutate({
       namespace: selectedRoute.namespace,
       httpRouteRef: selectedRoute.name,
@@ -144,11 +200,13 @@ export default function XCOverview() {
       originAddress: originAddress || undefined,
       wafEnabled,
       wafPolicyName: wafEnabled ? wafPolicyName || undefined : undefined,
+      webSocketEnabled,
     });
   };
 
   const handlePublish = () => {
     if (!selectedRoute) return;
+    setStatusMessage(null);
     const req: XCPublishRequest = {
       name: publishName,
       namespace: selectedRoute.namespace,
@@ -157,6 +215,7 @@ export default function XCOverview() {
       originAddress: originAddress || undefined,
       wafEnabled,
       wafPolicyName: wafEnabled ? wafPolicyName || undefined : undefined,
+      webSocketEnabled,
     };
     publishMutation.mutate(req);
   };
@@ -164,6 +223,7 @@ export default function XCOverview() {
   const handleDelete = (id: string, name: string) => {
     if (!confirm(`Delete publish "${name}"? This will also remove XC resources.`))
       return;
+    setStatusMessage(null);
     deleteMutation.mutate(id);
   };
 
@@ -187,6 +247,42 @@ export default function XCOverview() {
           {showWizard ? "Cancel" : "Publish Route"}
         </button>
       </div>
+
+      {/* Status Message Banner */}
+      {statusMessage && (
+        <div
+          className={`mt-4 rounded-lg border p-4 ${
+            statusMessage.type === "success"
+              ? "border-emerald-500/30 bg-emerald-500/10"
+              : statusMessage.type === "warning"
+                ? "border-yellow-500/30 bg-yellow-500/10"
+                : "border-red-500/30 bg-red-500/10"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <p
+              className={`text-sm ${
+                statusMessage.type === "success"
+                  ? "text-emerald-400"
+                  : statusMessage.type === "warning"
+                    ? "text-yellow-400"
+                    : "text-red-400"
+              }`}
+            >
+              {statusMessage.type === "success" && "✓ "}
+              {statusMessage.type === "warning" && "⚠ "}
+              {statusMessage.type === "error" && "✗ "}
+              {statusMessage.text}
+            </p>
+            <button
+              onClick={dismissMessage}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Not configured warning */}
       {!isConfigured && (
@@ -376,6 +472,30 @@ export default function XCOverview() {
                   )}
                 </div>
 
+                {/* WebSocket Toggle */}
+                <div className="mt-6">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="websocket-toggle"
+                      checked={webSocketEnabled}
+                      onChange={(e) => setWebSocketEnabled(e.target.checked)}
+                      className="h-4 w-4 rounded border-border bg-background text-blue-600 focus:ring-blue-500"
+                    />
+                    <label
+                      htmlFor="websocket-toggle"
+                      className="text-sm font-medium"
+                    >
+                      Enable WebSocket Support
+                    </label>
+                  </div>
+                  <p className="mt-1 ml-7 text-xs text-muted-foreground">
+                    Enable WebSocket protocol upgrade on routes. Required for
+                    applications that use real-time connections (e.g. chat,
+                    streaming).
+                  </p>
+                </div>
+
                 {/* Navigation */}
                 <div className="mt-6 flex items-center justify-between">
                   <button
@@ -396,9 +516,11 @@ export default function XCOverview() {
                 </div>
 
                 {previewMutation.isError && (
-                  <p className="mt-3 text-sm text-red-400">
-                    {String(previewMutation.error)}
-                  </p>
+                  <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+                    <p className="text-sm text-red-400">
+                      ✗ Preview failed: {String(previewMutation.error)}
+                    </p>
+                  </div>
                 )}
               </div>
             )}
@@ -465,9 +587,11 @@ export default function XCOverview() {
                 </div>
 
                 {publishMutation.isError && (
-                  <p className="mt-3 text-sm text-red-400">
-                    {String(publishMutation.error)}
-                  </p>
+                  <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+                    <p className="text-sm text-red-400">
+                      ✗ Publish failed: {String(publishMutation.error)}
+                    </p>
+                  </div>
                 )}
               </div>
             )}
@@ -551,7 +675,10 @@ export default function XCOverview() {
       <div className="mt-6">
         <h2 className="text-lg font-semibold">Publishes</h2>
         {publishesLoading && (
-          <p className="mt-3 text-muted-foreground">Loading publishes...</p>
+          <div className="mt-3 flex items-center gap-2 text-muted-foreground">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+            <p>Loading publishes...</p>
+          </div>
         )}
         {publishes && publishes.length === 0 && (
           <p className="mt-3 text-muted-foreground">
@@ -606,7 +733,7 @@ export default function XCOverview() {
                       <span
                         className={`inline-flex rounded-md border px-2 py-0.5 text-xs font-medium ${statusBadge(pub.phase)}`}
                       >
-                        {pub.phase || "Unknown"}
+                        {pub.phase || "Pending"}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
@@ -634,7 +761,7 @@ export default function XCOverview() {
                         disabled={deleteMutation.isPending}
                         className="text-xs text-red-400 hover:underline disabled:opacity-50"
                       >
-                        Delete
+                        {deleteMutation.isPending ? "Deleting..." : "Delete"}
                       </button>
                     </td>
                   </tr>
