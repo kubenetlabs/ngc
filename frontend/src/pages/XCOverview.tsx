@@ -190,16 +190,30 @@ export default function XCOverview() {
     setWizardStep("configure");
   };
 
+  // Parse a "namespace/name" WAF policy value into its parts.
+  const parseWAFPolicy = (
+    value: string
+  ): { name: string; namespace: string } | null => {
+    if (!value) return null;
+    const idx = value.indexOf("/");
+    if (idx > 0) {
+      return { namespace: value.slice(0, idx), name: value.slice(idx + 1) };
+    }
+    return { namespace: "", name: value };
+  };
+
   const handlePreview = () => {
     if (!selectedRoute) return;
     setStatusMessage(null);
+    const waf = wafEnabled ? parseWAFPolicy(wafPolicyName) : null;
     previewMutation.mutate({
       namespace: selectedRoute.namespace,
       httpRouteRef: selectedRoute.name,
       publicHostname: publicHostname || undefined,
       originAddress: originAddress || undefined,
       wafEnabled,
-      wafPolicyName: wafEnabled ? wafPolicyName || undefined : undefined,
+      wafPolicyName: waf?.name || undefined,
+      wafPolicyNamespace: waf?.namespace || undefined,
       webSocketEnabled,
     });
   };
@@ -207,6 +221,7 @@ export default function XCOverview() {
   const handlePublish = () => {
     if (!selectedRoute) return;
     setStatusMessage(null);
+    const waf = wafEnabled ? parseWAFPolicy(wafPolicyName) : null;
     const req: XCPublishRequest = {
       name: publishName,
       namespace: selectedRoute.namespace,
@@ -214,7 +229,8 @@ export default function XCOverview() {
       publicHostname: publicHostname || undefined,
       originAddress: originAddress || undefined,
       wafEnabled,
-      wafPolicyName: wafEnabled ? wafPolicyName || undefined : undefined,
+      wafPolicyName: waf?.name || undefined,
+      wafPolicyNamespace: waf?.namespace || undefined,
       webSocketEnabled,
     };
     publishMutation.mutate(req);
@@ -460,10 +476,13 @@ export default function XCOverview() {
                         onChange={(e) => setWafPolicyName(e.target.value)}
                         className={inputClass}
                       >
-                        <option value="">Default WAF Policy</option>
+                        <option value="">Select a WAF policy</option>
                         {wafPolicies?.map((p: WAFPolicy) => (
-                          <option key={p.name} value={p.name}>
-                            {p.name}
+                          <option
+                            key={`${p.namespace}/${p.name}`}
+                            value={`${p.namespace}/${p.name}`}
+                          >
+                            {p.namespace}/{p.name}
                             {p.mode ? ` (${p.mode})` : ""}
                           </option>
                         ))}
