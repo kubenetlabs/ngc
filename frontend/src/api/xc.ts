@@ -15,6 +15,7 @@ export interface XCPublish {
   wafPolicyAttached?: string;
   lastSyncedAt?: string;
   createdAt: string;
+  errors?: string[];
 }
 
 export interface XCStatusResponse {
@@ -46,6 +47,7 @@ export interface XCPublishRequest {
   originAddress?: string;
   wafEnabled?: boolean;
   wafPolicyName?: string;
+  webSocketEnabled?: boolean;
   distributedCloud?: Record<string, unknown>;
 }
 
@@ -77,6 +79,7 @@ export interface XCPreviewRequest {
   originAddress?: string;
   wafEnabled?: boolean;
   wafPolicyName?: string;
+  webSocketEnabled?: boolean;
 }
 
 export interface XCPreviewResponse {
