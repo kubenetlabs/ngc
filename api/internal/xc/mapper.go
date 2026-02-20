@@ -9,13 +9,14 @@ import (
 
 // MapOptions controls how an HTTPRoute is mapped to an XC HTTP Load Balancer.
 type MapOptions struct {
-	XCNamespace    string // target XC namespace
-	Tenant         string // XC tenant name for resource references
-	PublicHostname string // override hostname for edge (optional)
-	WAFEnabled     bool   // whether to attach WAF
-	WAFPolicyName  string // specific WAF policy to use (or empty for default)
-	OriginPort     int32  // port to use for origin pool
-	OriginTLS      bool   // whether origin uses TLS
+	XCNamespace       string // target XC namespace
+	Tenant            string // XC tenant name for resource references
+	PublicHostname    string // override hostname for edge (optional)
+	WAFEnabled        bool   // whether to attach WAF
+	WAFPolicyName     string // specific WAF policy to use (or empty for default)
+	WAFPolicyNamespace string // XC namespace where the WAF policy lives (e.g. "shared")
+	OriginPort        int32  // port to use for origin pool
+	OriginTLS         bool   // whether origin uses TLS
 	OriginHostRewrite string // hostname to set as Host header when forwarding to origin
 	WebSocketEnabled  bool   // whether to enable WebSocket protocol upgrade on routes
 }
@@ -167,8 +168,9 @@ func MapHTTPRouteToLoadBalancer(route *gatewayv1.HTTPRoute, gatewayAddress strin
 		}
 	}
 
-	// Use HTTP type for the LB. The XC auto-generated CNAME will be added
-	// to the domains list after creation via a GET+PUT cycle in the handler.
+	// Set the loadbalancer_type to HTTP. The http block is required by XC to
+	// identify this as an HTTP LB. Do NOT set dns_volterra_managed — that
+	// triggers DNS zone validation errors for private/local domains.
 	port := uint32(80)
 	lb.Spec.HTTPListenPort = &port
 	lb.Spec.HTTP = &HTTPConfig{
@@ -181,8 +183,12 @@ func MapHTTPRouteToLoadBalancer(route *gatewayv1.HTTPRoute, gatewayAddress strin
 		if policyName == "" {
 			policyName = "default"
 		}
+		wafNs := opts.WAFPolicyNamespace
+		if wafNs == "" {
+			wafNs = opts.XCNamespace
+		}
 		lb.Spec.AppFirewall = &AppFirewallRef{
-			Namespace: opts.XCNamespace,
+			Namespace: wafNs,
 			Name:      policyName,
 		}
 	} else {

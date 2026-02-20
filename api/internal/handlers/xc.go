@@ -40,16 +40,17 @@ type XCStatusResponse struct {
 
 // XCPublishRequest represents a request to create a DistributedCloudPublish resource.
 type XCPublishRequest struct {
-	Name             string                 `json:"name"`
-	Namespace        string                 `json:"namespace"`
-	HTTPRouteRef     string                 `json:"httpRouteRef"`
-	InferencePoolRef string                 `json:"inferencePoolRef,omitempty"`
-	PublicHostname   string                 `json:"publicHostname,omitempty"`
-	OriginAddress    string                 `json:"originAddress,omitempty"`
-	WAFEnabled       bool                   `json:"wafEnabled,omitempty"`
-	WAFPolicyName    string                 `json:"wafPolicyName,omitempty"`
-	WebSocketEnabled bool                   `json:"webSocketEnabled,omitempty"`
-	DistributedCloud map[string]interface{} `json:"distributedCloud,omitempty"`
+	Name               string                 `json:"name"`
+	Namespace          string                 `json:"namespace"`
+	HTTPRouteRef       string                 `json:"httpRouteRef"`
+	InferencePoolRef   string                 `json:"inferencePoolRef,omitempty"`
+	PublicHostname     string                 `json:"publicHostname,omitempty"`
+	OriginAddress      string                 `json:"originAddress,omitempty"`
+	WAFEnabled         bool                   `json:"wafEnabled,omitempty"`
+	WAFPolicyName      string                 `json:"wafPolicyName,omitempty"`
+	WAFPolicyNamespace string                 `json:"wafPolicyNamespace,omitempty"`
+	WebSocketEnabled   bool                   `json:"webSocketEnabled,omitempty"`
+	DistributedCloud   map[string]interface{} `json:"distributedCloud,omitempty"`
 }
 
 // XCPublishResponse represents a DistributedCloudPublish resource response.
@@ -106,13 +107,14 @@ type XCTestConnectionResponse struct {
 
 // XCPreviewRequest represents a request to preview an XC publish configuration.
 type XCPreviewRequest struct {
-	Namespace        string `json:"namespace"`
-	HTTPRouteRef     string `json:"httpRouteRef"`
-	PublicHostname   string `json:"publicHostname,omitempty"`
-	OriginAddress    string `json:"originAddress,omitempty"`
-	WAFEnabled       bool   `json:"wafEnabled,omitempty"`
-	WAFPolicyName    string `json:"wafPolicyName,omitempty"`
-	WebSocketEnabled bool   `json:"webSocketEnabled,omitempty"`
+	Namespace          string `json:"namespace"`
+	HTTPRouteRef       string `json:"httpRouteRef"`
+	PublicHostname     string `json:"publicHostname,omitempty"`
+	OriginAddress      string `json:"originAddress,omitempty"`
+	WAFEnabled         bool   `json:"wafEnabled,omitempty"`
+	WAFPolicyName      string `json:"wafPolicyName,omitempty"`
+	WAFPolicyNamespace string `json:"wafPolicyNamespace,omitempty"`
+	WebSocketEnabled   bool   `json:"webSocketEnabled,omitempty"`
 }
 
 // XCPreviewResponse represents the derived XC configuration for review.
@@ -125,6 +127,7 @@ type XCPreviewResponse struct {
 // WAFPolicyResponse represents a WAF policy available in XC.
 type WAFPolicyResponse struct {
 	Name        string `json:"name"`
+	Namespace   string `json:"namespace"`
 	Description string `json:"description,omitempty"`
 	Mode        string `json:"mode,omitempty"`
 }
@@ -354,14 +357,15 @@ func (h *XCHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opts := xc.MapOptions{
-		XCNamespace:      xcNamespace,
-		Tenant:           xcTenant,
-		PublicHostname:   req.PublicHostname,
-		WAFEnabled:       req.WAFEnabled,
-		WAFPolicyName:    req.WAFPolicyName,
-		WebSocketEnabled: req.WebSocketEnabled,
-		OriginPort:       80,
-		OriginTLS:        false,
+		XCNamespace:        xcNamespace,
+		Tenant:             xcTenant,
+		PublicHostname:     req.PublicHostname,
+		WAFEnabled:         req.WAFEnabled,
+		WAFPolicyName:      req.WAFPolicyName,
+		WAFPolicyNamespace: req.WAFPolicyNamespace,
+		WebSocketEnabled:   req.WebSocketEnabled,
+		OriginPort:         80,
+		OriginTLS:          false,
 	}
 
 	// Detect port and TLS from Gateway listeners.
@@ -404,7 +408,11 @@ func (h *XCHandler) Preview(w http.ResponseWriter, r *http.Request) {
 		if policyName == "" {
 			policyName = "default"
 		}
-		preview.WAFPolicy = &policyName
+		wafDisplay := policyName
+		if req.WAFPolicyNamespace != "" {
+			wafDisplay = req.WAFPolicyNamespace + "/" + policyName
+		}
+		preview.WAFPolicy = &wafDisplay
 	}
 
 	writeJSON(w, http.StatusOK, preview)
@@ -459,7 +467,12 @@ func (h *XCHandler) Publish(w http.ResponseWriter, r *http.Request) {
 		if policyName == "" {
 			policyName = "default"
 		}
-		req.DistributedCloud["wafPolicy"] = policyName
+		wafNs := req.WAFPolicyNamespace
+		if wafNs != "" {
+			req.DistributedCloud["wafPolicy"] = wafNs + "/" + policyName
+		} else {
+			req.DistributedCloud["wafPolicy"] = policyName
+		}
 	}
 
 	// Create or update the CRD object in K8s.
@@ -523,14 +536,15 @@ func (h *XCHandler) Publish(w http.ResponseWriter, r *http.Request) {
 
 			xcNs := creds.Namespace
 			opts := xc.MapOptions{
-				XCNamespace:      xcNs,
-				Tenant:           creds.Tenant,
-				PublicHostname:   req.PublicHostname,
-				WAFEnabled:       req.WAFEnabled,
-				WAFPolicyName:    req.WAFPolicyName,
-				WebSocketEnabled: req.WebSocketEnabled,
-				OriginPort:       originPort,
-				OriginTLS:        originTLS,
+				XCNamespace:        xcNs,
+				Tenant:             creds.Tenant,
+				PublicHostname:     req.PublicHostname,
+				WAFEnabled:         req.WAFEnabled,
+				WAFPolicyName:      req.WAFPolicyName,
+				WAFPolicyNamespace: req.WAFPolicyNamespace,
+				WebSocketEnabled:   req.WebSocketEnabled,
+				OriginPort:         originPort,
+				OriginTLS:          originTLS,
 			}
 
 			// Allow origin address override (e.g. when local hostname differs from public IP).
@@ -587,7 +601,11 @@ func (h *XCHandler) Publish(w http.ResponseWriter, r *http.Request) {
 				if policyName == "" {
 					policyName = "default"
 				}
-				resp.WAFPolicyAttached = policyName
+				if req.WAFPolicyNamespace != "" {
+					resp.WAFPolicyAttached = req.WAFPolicyNamespace + "/" + policyName
+				} else {
+					resp.WAFPolicyAttached = policyName
+				}
 			}
 		}
 	}
@@ -767,6 +785,7 @@ func (h *XCHandler) cleanupXCResources(r *http.Request, obj *unstructured.Unstru
 // --- WAF ---
 
 // ListWAFPolicies returns available WAF policies from the XC tenant.
+// Queries both the user's namespace and the "shared" namespace.
 func (h *XCHandler) ListWAFPolicies(w http.ResponseWriter, r *http.Request) {
 	xcClient, err := h.getXCClient(r)
 	if err != nil {
@@ -780,21 +799,55 @@ func (h *XCHandler) ListWAFPolicies(w http.ResponseWriter, r *http.Request) {
 		xcNs = creds.Namespace
 	}
 
-	firewalls, err := xcClient.ListAppFirewalls(r.Context(), xcNs)
+	resp := make([]WAFPolicyResponse, 0)
+	seen := make(map[string]bool)
+
+	// List from shared namespace first (most WAF policies live here).
+	sharedFW, err := xcClient.ListAppFirewalls(r.Context(), "shared")
 	if err != nil {
-		slog.Warn("failed to list XC WAF policies", "error", err)
-		writeJSON(w, http.StatusOK, []WAFPolicyResponse{})
-		return
+		slog.Warn("failed to list shared XC WAF policies", "error", err)
+	}
+	for _, fw := range sharedFW {
+		ns := fw.Namespace
+		if ns == "" {
+			ns = "shared"
+		}
+		key := ns + "/" + fw.Name
+		if !seen[key] {
+			seen[key] = true
+			resp = append(resp, WAFPolicyResponse{
+				Name:        fw.Name,
+				Namespace:   ns,
+				Description: fw.Description,
+				Mode:        fw.Mode,
+			})
+		}
 	}
 
-	resp := make([]WAFPolicyResponse, 0, len(firewalls))
-	for _, fw := range firewalls {
-		resp = append(resp, WAFPolicyResponse{
-			Name:        fw.Name,
-			Description: fw.Description,
-			Mode:        fw.Mode,
-		})
+	// Also list from user's namespace if different from shared.
+	if xcNs != "shared" {
+		userFW, err := xcClient.ListAppFirewalls(r.Context(), xcNs)
+		if err != nil {
+			slog.Warn("failed to list user XC WAF policies", "namespace", xcNs, "error", err)
+		}
+		for _, fw := range userFW {
+			ns := fw.Namespace
+			if ns == "" {
+				ns = xcNs
+			}
+			key := ns + "/" + fw.Name
+			if !seen[key] {
+				seen[key] = true
+				resp = append(resp, WAFPolicyResponse{
+					Name:        fw.Name,
+					Namespace:   ns,
+					Description: fw.Description,
+					Mode:        fw.Mode,
+				})
+			}
+		}
 	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

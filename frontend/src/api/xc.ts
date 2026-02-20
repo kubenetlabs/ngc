@@ -47,6 +47,7 @@ export interface XCPublishRequest {
   originAddress?: string;
   wafEnabled?: boolean;
   wafPolicyName?: string;
+  wafPolicyNamespace?: string;
   webSocketEnabled?: boolean;
   distributedCloud?: Record<string, unknown>;
 }
@@ -79,6 +80,7 @@ export interface XCPreviewRequest {
   originAddress?: string;
   wafEnabled?: boolean;
   wafPolicyName?: string;
+  wafPolicyNamespace?: string;
   webSocketEnabled?: boolean;
 }
 
@@ -92,6 +94,7 @@ export interface XCPreviewResponse {
 
 export interface WAFPolicy {
   name: string;
+  namespace: string;
   description?: string;
   mode?: string;
 }
