@@ -20,18 +20,33 @@ const router = createBrowserRouter(routes);
 
 function EditionDetector() {
   const setEdition = useSettingsStore((s) => s.setEdition);
+  const edition = useSettingsStore((s) => s.edition);
   const activeCluster = useActiveCluster();
   const { data } = useQuery({
     queryKey: ["config", activeCluster],
     queryFn: fetchConfig,
-    staleTime: Infinity,
+    staleTime: 60_000, // Re-check every 60s so transient failures self-correct
+    refetchOnWindowFocus: true,
   });
 
   useEffect(() => {
-    if (data?.edition) {
-      setEdition(data.edition);
+    if (!data?.edition) return;
+
+    const incoming = data.edition;
+
+    // Never downgrade a known-good "enterprise" to "unknown" or "oss" —
+    // transient API errors during pod restarts can cause false downgrades.
+    // Only overwrite if: incoming is "enterprise" (always accept upgrade),
+    // or the current value is "unknown" (no good value yet).
+    if (incoming === "enterprise") {
+      setEdition(incoming);
+    } else if (edition === "unknown") {
+      setEdition(incoming);
     }
-  }, [data?.edition, setEdition]);
+    // If edition is already "enterprise" and incoming is "oss" or "unknown",
+    // we keep the stored "enterprise" — it can only be downgraded by an
+    // explicit "oss" response when the current stored value is "unknown".
+  }, [data?.edition, edition, setEdition]);
 
   return null;
 }

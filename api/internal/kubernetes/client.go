@@ -22,6 +22,7 @@ type Client struct {
 	client        client.Client
 	dynamicClient dynamic.Interface
 	restConfig    *rest.Config
+	edition       editionCache // cached edition detection result
 }
 
 // RestConfig returns the underlying REST configuration.

@@ -6,7 +6,7 @@ frontend:
   replicas: 2
   image:
     repository: danny2guns/ngf-console-frontend
-    tag: "0.2.0"
+    tag: "0.2.1"
     pullPolicy: Always
   resources:
     requests:
@@ -20,7 +20,7 @@ api:
   replicas: 1
   image:
     repository: danny2guns/ngf-console-api
-    tag: "0.2.1"
+    tag: "0.2.3"
     pullPolicy: Always
   resources:
     requests:

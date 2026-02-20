@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,6 +62,14 @@ func (h *PolicyHandler) List(w http.ResponseWriter, r *http.Request) {
 		list, err = dc.Resource(gvr).Namespace("").List(r.Context(), metav1.ListOptions{})
 	}
 	if err != nil {
+		// Return empty list for missing CRDs or RBAC errors instead of 500
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "could not find the requested resource") ||
+			strings.Contains(errMsg, "not found") ||
+			strings.Contains(errMsg, "is forbidden") {
+			writeJSON(w, http.StatusOK, []PolicyResponse{})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("listing policies: %v", err))
 		return
 	}
