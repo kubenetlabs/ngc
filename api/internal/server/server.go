@@ -113,21 +113,21 @@ func (s *Server) Run(addr string) error {
 
 // registerRoutes mounts all API v1 route groups.
 func (s *Server) registerRoutes() {
-	gw := &handlers.GatewayHandler{}
-	rt := &handlers.RouteHandler{}
+	gw := &handlers.GatewayHandler{Store: s.Config.Store}
+	rt := &handlers.RouteHandler{Store: s.Config.Store}
 	cfgHandler := &handlers.ConfigHandler{}
 	clusterHandler := &handlers.ClusterHandler{Manager: s.Config.ClusterManager, Pool: s.Config.Pool}
-	pol := &handlers.PolicyHandler{}
-	cert := &handlers.CertificateHandler{}
+	pol := &handlers.PolicyHandler{Store: s.Config.Store}
+	cert := &handlers.CertificateHandler{Store: s.Config.Store}
 	met := &handlers.MetricsHandler{Prom: s.Config.PromClient}
 	lg := &handlers.LogHandler{CH: s.Config.CHClient}
 	topo := &handlers.TopologyHandler{}
 	diag := &handlers.DiagnosticsHandler{}
-	inf := &handlers.InferenceHandler{Provider: s.Config.MetricsProvider}
+	inf := &handlers.InferenceHandler{Provider: s.Config.MetricsProvider, Store: s.Config.Store}
 	infMet := &handlers.InferenceMetricsHandler{Provider: s.Config.MetricsProvider}
 	infDiag := &handlers.InferenceDiagHandler{}
-	infStack := &handlers.InferenceStackHandler{MetricsProvider: s.Config.MetricsProvider}
-	gwBundle := &handlers.GatewayBundleHandler{}
+	infStack := &handlers.InferenceStackHandler{MetricsProvider: s.Config.MetricsProvider, Store: s.Config.Store}
+	gwBundle := &handlers.GatewayBundleHandler{Store: s.Config.Store}
 	coex := &handlers.CoexistenceHandler{}
 	xc := &handlers.XCHandler{Store: s.Config.Store}
 	mig := &handlers.MigrationHandler{}

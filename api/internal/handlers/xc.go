@@ -636,6 +636,7 @@ func (h *XCHandler) Publish(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("failed to patch CRD status", "error", patchErr)
 	}
 
+	auditLog(h.Store, r.Context(), "create", "DistributedCloudPublish", req.Name, req.Namespace, nil, resp)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -703,6 +704,8 @@ func (h *XCHandler) DeletePublish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deleting distributedcloudpublish %s/%s: %v", ns, name, err))
 		return
 	}
+
+	auditLog(h.Store, r.Context(), "delete", "DistributedCloudPublish", name, ns, map[string]string{"name": name, "namespace": ns}, nil)
 
 	resp := map[string]any{
 		"message":   "distributedcloudpublish deleted",

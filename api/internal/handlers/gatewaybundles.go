@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/database"
 )
 
 var gatewayBundleGVR = schema.GroupVersionResource{
@@ -23,6 +24,7 @@ var gatewayBundleGVR = schema.GroupVersionResource{
 // GatewayBundleHandler handles GatewayBundle CRD API requests using the dynamic client.
 type GatewayBundleHandler struct {
 	DynamicClient dynamic.Interface
+	Store         database.Store
 }
 
 // getDynamicClient returns the dynamic client from the handler field or falls back
@@ -103,7 +105,9 @@ func (h *GatewayBundleHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("creating gatewaybundle: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusCreated, toGatewayBundleResponse(created))
+	resp := toGatewayBundleResponse(created)
+	auditLog(h.Store, r.Context(), "create", "GatewayBundle", req.Name, req.Namespace, nil, resp)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // Update modifies an existing GatewayBundle by namespace and name.
@@ -144,6 +148,7 @@ func (h *GatewayBundleHandler) Update(w http.ResponseWriter, r *http.Request) {
 		TLS:              req.TLS,
 	}
 
+	beforeResp := toGatewayBundleResponse(existing)
 	updated := toGatewayBundleUnstructured(createReq)
 	updated.SetNamespace(ns)
 	updated.SetName(name)
@@ -156,7 +161,9 @@ func (h *GatewayBundleHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("updating gatewaybundle %s/%s: %v", ns, name, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, toGatewayBundleResponse(result))
+	afterResp := toGatewayBundleResponse(result)
+	auditLog(h.Store, r.Context(), "update", "GatewayBundle", name, ns, beforeResp, afterResp)
+	writeJSON(w, http.StatusOK, afterResp)
 }
 
 // Delete removes a GatewayBundle by namespace and name.
@@ -175,6 +182,7 @@ func (h *GatewayBundleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deleting gatewaybundle %s/%s: %v", ns, name, err))
 		return
 	}
+	auditLog(h.Store, r.Context(), "delete", "GatewayBundle", name, ns, map[string]string{"name": name, "namespace": ns}, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "gatewaybundle deleted", "name": name, "namespace": ns})
 }
 

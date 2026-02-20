@@ -10,12 +10,15 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/database"
 )
 
 // GatewayHandler handles Gateway and GatewayClass API requests.
 // Create, Update, and Delete now operate on GatewayBundle CRDs,
 // while List and Get still read Gateway resources directly for live status.
-type GatewayHandler struct{}
+type GatewayHandler struct {
+	Store database.Store
+}
 
 // getDynamicClient returns the dynamic client from the cluster context.
 func (h *GatewayHandler) getDynamicClient(r *http.Request) dynamic.Interface {
@@ -134,7 +137,9 @@ func (h *GatewayHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("creating gatewaybundle: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusCreated, toGatewayBundleResponse(created))
+	resp := toGatewayBundleResponse(created)
+	auditLog(h.Store, r.Context(), "create", "Gateway", req.Name, req.Namespace, nil, resp)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // Update modifies an existing gateway via the GatewayBundle CRD.
@@ -175,7 +180,9 @@ func (h *GatewayHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("updating gatewaybundle %s/%s: %v", ns, name, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, toGatewayBundleResponse(result))
+	resp := toGatewayBundleResponse(result)
+	auditLog(h.Store, r.Context(), "update", "Gateway", name, ns, toGatewayBundleResponse(existing), resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Delete removes a gateway via the GatewayBundle CRD.
@@ -194,6 +201,7 @@ func (h *GatewayHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deleting gatewaybundle %s/%s: %v", ns, name, err))
 		return
 	}
+	auditLog(h.Store, r.Context(), "delete", "Gateway", name, ns, map[string]string{"name": name, "namespace": ns}, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "gateway deleted", "name": name, "namespace": ns})
 }
 

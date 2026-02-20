@@ -127,6 +127,7 @@ func (h *AlertHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditLog(h.Store, r.Context(), "create", "AlertRule", rule.Name, "", nil, rule)
 	writeJSON(w, http.StatusCreated, rule)
 }
 
@@ -211,6 +212,7 @@ func (h *AlertHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditLog(h.Store, r.Context(), "update", "AlertRule", existing.Name, "", nil, existing)
 	writeJSON(w, http.StatusOK, existing)
 }
 
@@ -237,6 +239,7 @@ func (h *AlertHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditLog(h.Store, r.Context(), "delete", "AlertRule", existing.Name, "", existing, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "alert rule deleted", "id": id})
 }
 

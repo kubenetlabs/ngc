@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/database"
 	"github.com/kubenetlabs/ngc/api/internal/inference"
 )
 
@@ -21,6 +22,7 @@ import (
 type InferenceHandler struct {
 	Provider      inference.MetricsProvider
 	DynamicClient dynamic.Interface
+	Store         database.Store
 }
 
 // getDynamicClient returns the dynamic client from the handler field or falls back
@@ -159,7 +161,9 @@ func (h *InferenceHandler) CreatePool(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      time.Now(),
 	})
 
-	writeJSON(w, http.StatusCreated, toInferenceStackResponse(created))
+	resp := toInferenceStackResponse(created)
+	auditLog(h.Store, r.Context(), "create", "InferencePool", req.Name, req.Namespace, nil, resp)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // UpdatePoolRequest is the request body for updating a pool.
@@ -254,12 +258,15 @@ func (h *InferenceHandler) UpdatePool(w http.ResponseWriter, r *http.Request) {
 
 	existing.Object["spec"] = spec
 
+	beforeResp := toInferenceStackResponse(existing)
 	result, err := dc.Resource(inferenceStackGVR).Namespace(existing.GetNamespace()).Update(r.Context(), existing, metav1.UpdateOptions{})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("updating inferencestack %s: %v", name, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, toInferenceStackResponse(result))
+	afterResp := toInferenceStackResponse(result)
+	auditLog(h.Store, r.Context(), "update", "InferencePool", name, existing.GetNamespace(), beforeResp, afterResp)
+	writeJSON(w, http.StatusOK, afterResp)
 }
 
 // DeletePool removes an inference pool by deleting its InferenceStack CRD.
@@ -288,6 +295,7 @@ func (h *InferenceHandler) DeletePool(w http.ResponseWriter, r *http.Request) {
 	// Remove pool metadata from ClickHouse.
 	_ = h.Provider.DeletePool(r.Context(), name, ns)
 
+	auditLog(h.Store, r.Context(), "delete", "InferencePool", name, ns, map[string]string{"name": name, "namespace": ns}, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "inference pool deleted", "name": name, "namespace": ns})
 }
 

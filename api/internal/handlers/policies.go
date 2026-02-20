@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/database"
 )
 
 // policyGVR maps policy type strings to their GVR in the cluster.
@@ -22,7 +23,9 @@ var policyGVR = map[string]schema.GroupVersionResource{
 }
 
 // PolicyHandler handles policy API requests (rate-limit, auth, retry, etc.).
-type PolicyHandler struct{}
+type PolicyHandler struct {
+	Store database.Store
+}
 
 func (h *PolicyHandler) resolvePolicyType(r *http.Request) (schema.GroupVersionResource, string, bool) {
 	policyType := chi.URLParam(r, "type")
@@ -149,7 +152,9 @@ func (h *PolicyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("creating policy: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusCreated, toPolicyResponse(created))
+	resp := toPolicyResponse(created)
+	auditLog(h.Store, r.Context(), "create", "Policy", req.Name, req.Namespace, nil, resp)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // Update modifies an existing policy.
@@ -189,6 +194,7 @@ func (h *PolicyHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	beforeResp := toPolicyResponse(existing)
 	existing.Object["spec"] = req.Spec
 
 	updated, err := dc.Resource(gvr).Namespace(namespace).Update(r.Context(), existing, metav1.UpdateOptions{})
@@ -196,7 +202,9 @@ func (h *PolicyHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("updating policy: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, toPolicyResponse(updated))
+	afterResp := toPolicyResponse(updated)
+	auditLog(h.Store, r.Context(), "update", "Policy", name, namespace, beforeResp, afterResp)
+	writeJSON(w, http.StatusOK, afterResp)
 }
 
 // Delete removes a policy.
@@ -228,6 +236,7 @@ func (h *PolicyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deleting policy: %v", err))
 		return
 	}
+	auditLog(h.Store, r.Context(), "delete", "Policy", name, namespace, map[string]string{"name": name, "namespace": namespace}, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 

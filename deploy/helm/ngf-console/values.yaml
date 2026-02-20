@@ -20,7 +20,7 @@ api:
   replicas: 1
   image:
     repository: danny2guns/ngf-console-api
-    tag: "0.1.2-ws-fix"
+    tag: "0.2.0"
     pullPolicy: Always
   resources:
     requests:

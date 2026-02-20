@@ -11,10 +11,13 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/database"
 )
 
 // RouteHandler handles HTTPRoute, GRPCRoute, TLSRoute, TCPRoute, and UDPRoute API requests.
-type RouteHandler struct{}
+type RouteHandler struct {
+	Store database.Store
+}
 
 // List returns all HTTPRoutes, optionally filtered by ?namespace= query param.
 func (h *RouteHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +85,9 @@ func (h *RouteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, toHTTPRouteResponse(created))
+	resp := toHTTPRouteResponse(created)
+	auditLog(h.Store, r.Context(), "create", "HTTPRoute", req.Name, req.Namespace, nil, resp)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // Update modifies an existing HTTPRoute.
@@ -108,6 +113,7 @@ func (h *RouteHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	beforeResp := toHTTPRouteResponse(existing)
 	applyUpdateToHTTPRoute(existing, req)
 
 	updated, err := k8s.UpdateHTTPRoute(r.Context(), existing)
@@ -115,7 +121,9 @@ func (h *RouteHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, toHTTPRouteResponse(updated))
+	afterResp := toHTTPRouteResponse(updated)
+	auditLog(h.Store, r.Context(), "update", "HTTPRoute", name, ns, beforeResp, afterResp)
+	writeJSON(w, http.StatusOK, afterResp)
 }
 
 // Delete removes an HTTPRoute.
@@ -133,6 +141,7 @@ func (h *RouteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	auditLog(h.Store, r.Context(), "delete", "HTTPRoute", name, ns, map[string]string{"name": name, "namespace": ns}, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "httproute deleted", "name": name, "namespace": ns})
 }
 

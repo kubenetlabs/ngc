@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/database"
 	"github.com/kubenetlabs/ngc/api/internal/inference"
 )
 
@@ -26,6 +27,7 @@ var inferenceStackGVR = schema.GroupVersionResource{
 type InferenceStackHandler struct {
 	DynamicClient   dynamic.Interface
 	MetricsProvider inference.MetricsProvider
+	Store           database.Store
 }
 
 // getDynamicClient returns the dynamic client from the handler field or falls back
@@ -125,7 +127,9 @@ func (h *InferenceStackHandler) Create(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusCreated, toInferenceStackResponse(created))
+	resp := toInferenceStackResponse(created)
+	auditLog(h.Store, r.Context(), "create", "InferenceStack", req.Name, req.Namespace, nil, resp)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // Update modifies an existing InferenceStack by namespace and name.
@@ -153,6 +157,7 @@ func (h *InferenceStackHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build the updated object, preserving metadata from existing.
+	beforeResp := toInferenceStackResponse(existing)
 	updated := toInferenceStackUnstructured(req)
 	updated.SetNamespace(ns)
 	updated.SetName(name)
@@ -165,7 +170,9 @@ func (h *InferenceStackHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("updating inferencestack %s/%s: %v", ns, name, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, toInferenceStackResponse(result))
+	afterResp := toInferenceStackResponse(result)
+	auditLog(h.Store, r.Context(), "update", "InferenceStack", name, ns, beforeResp, afterResp)
+	writeJSON(w, http.StatusOK, afterResp)
 }
 
 // Delete removes an InferenceStack by namespace and name.
@@ -190,6 +197,7 @@ func (h *InferenceStackHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		_ = h.MetricsProvider.DeletePool(r.Context(), name, ns)
 	}
 
+	auditLog(h.Store, r.Context(), "delete", "InferenceStack", name, ns, map[string]string{"name": name, "namespace": ns}, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "inferencestack deleted", "name": name, "namespace": ns})
 }
 

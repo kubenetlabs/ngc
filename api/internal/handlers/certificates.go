@@ -12,10 +12,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/kubenetlabs/ngc/api/internal/cluster"
+	"github.com/kubenetlabs/ngc/api/internal/database"
 )
 
 // CertificateHandler handles TLS certificate API requests.
-type CertificateHandler struct{}
+type CertificateHandler struct {
+	Store database.Store
+}
 
 // CertificateResponse is the API response for a TLS certificate.
 type CertificateResponse struct {
@@ -111,6 +114,7 @@ func (h *CertificateHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("deleting certificate: %v", err))
 		return
 	}
+	auditLog(h.Store, r.Context(), "delete", "Certificate", name, namespace, map[string]string{"name": name, "namespace": namespace}, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
