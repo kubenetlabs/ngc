@@ -24,12 +24,18 @@ spec:
         - name: HTTPRoute
           type: string
           jsonPath: .spec.httpRouteRef
-        - name: Tenant
+        - name: Phase
           type: string
-          jsonPath: .spec.distributedCloud.tenant
-        - name: Hostname
+          jsonPath: .status.phase
+        - name: XC LB
           type: string
-          jsonPath: .spec.distributedCloud.publicHostname
+          jsonPath: .status.xcLoadBalancerName
+        - name: WAF
+          type: string
+          jsonPath: .status.wafPolicyAttached
+        - name: Synced
+          type: string
+          jsonPath: .status.lastSyncedAt
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -160,6 +166,35 @@ spec:
               description: Observed state of the DistributedCloudPublish resource.
               type: object
               properties:
+                phase:
+                  description: >-
+                    Current phase of the publish (Pending, Published, Error).
+                  type: string
+                xcLoadBalancerName:
+                  description: >-
+                    Name of the HTTP Load Balancer created in XC.
+                  type: string
+                xcOriginPoolName:
+                  description: >-
+                    Name of the origin pool created in XC.
+                  type: string
+                xcVirtualIP:
+                  description: >-
+                    Virtual IP assigned by XC for the load balancer.
+                  type: string
+                xcDNS:
+                  description: >-
+                    DNS name assigned by XC for the load balancer.
+                  type: string
+                wafPolicyAttached:
+                  description: >-
+                    WAF policy attached to the XC load balancer.
+                  type: string
+                lastSyncedAt:
+                  description: >-
+                    Timestamp of the last successful sync to XC.
+                  type: string
+                  format: date-time
                 conditions:
                   description: >-
                     Conditions represent the latest available observations
