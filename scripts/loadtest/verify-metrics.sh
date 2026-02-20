@@ -85,6 +85,24 @@ if isinstance(d,list):
         print(f'         -> {ns}/{name} (host={host}, rps={rps:.2f})')
 " 2>/dev/null || true
 
+# Check that we see metrics from both gateways' nginx pods
+# The API returns nginx pod/service names, not HTTPRoute names
+HAS_LLM_ROUTE=$(echo "$BY_ROUTE" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+found = any('llm-gateway' in r.get('name','') for r in d) if isinstance(d,list) else False
+print('true' if found else 'false')
+" 2>/dev/null || echo "false")
+check "llm-gateway nginx pod in route metrics" "$HAS_LLM_ROUTE" ""
+
+HAS_ECOMM_ROUTE=$(echo "$BY_ROUTE" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+found = any('ecomm' in r.get('name','') for r in d) if isinstance(d,list) else False
+print('true' if found else 'false')
+" 2>/dev/null || echo "false")
+check "ecomm nginx pod in route metrics" "$HAS_ECOMM_ROUTE" ""
+
 echo ""
 
 # --- Check 3: Metrics by Gateway ---
@@ -107,6 +125,23 @@ if isinstance(d,list):
         active = g.get('activeConnections',0)
         print(f'         -> {ns}/{name} (rps={rps:.2f}, connections={active})')
 " 2>/dev/null || true
+
+# Check for specific expected gateways (API returns service names like llm-gateway-nginx)
+HAS_LLM_GW=$(echo "$BY_GW" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+found = any('llm-gateway' in g.get('name','') for g in d) if isinstance(d,list) else False
+print('true' if found else 'false')
+" 2>/dev/null || echo "false")
+check "llm-gateway in gateway metrics" "$HAS_LLM_GW" ""
+
+HAS_ECOMM_GW=$(echo "$BY_GW" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+found = any('ecomm' in g.get('name','') for g in d) if isinstance(d,list) else False
+print('true' if found else 'false')
+" 2>/dev/null || echo "false")
+check "ecomm in gateway metrics" "$HAS_ECOMM_GW" ""
 
 echo ""
 

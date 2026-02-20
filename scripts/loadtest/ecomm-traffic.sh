@@ -1,18 +1,32 @@
 #!/usr/bin/env bash
 #
-# openwebui-traffic.sh — Sustained HTTP GET traffic through openwebui-route via NGF gateway
+# ecomm-traffic.sh — Sustained HTTP traffic to the Online Boutique ecomm app via NGF gateway
+#
+# Generates varied GET requests across multiple storefront paths to produce
+# realistic traffic patterns in the observability dashboards.
 #
 # Usage:
-#   ./openwebui-traffic.sh
-#   ELB_HOST=my-elb.example.com DURATION=60 CONCURRENCY=10 ./openwebui-traffic.sh
+#   ./ecomm-traffic.sh
+#   ELB_HOST=my-elb.example.com DURATION=60 CONCURRENCY=10 ./ecomm-traffic.sh
 #
 
 set -euo pipefail
 
-ELB_HOST="${ELB_HOST:-k8s-nginxgat-llmgatew-bda66d5efd-8abb027b3d9f5051.elb.us-east-1.amazonaws.com}"
-VIRTUAL_HOST="${VIRTUAL_HOST:-chat.llm.local}"
+ELB_HOST="${ELB_HOST:-k8s-nginxgat-ecommngi-3106c80616-8d048562cdf95f22.elb.us-east-1.amazonaws.com}"
+VIRTUAL_HOST="${VIRTUAL_HOST:-ecomm.llm.local}"
 DURATION="${DURATION:-300}"
-CONCURRENCY="${CONCURRENCY:-20}"
+CONCURRENCY="${CONCURRENCY:-15}"
+
+# Paths to cycle through for varied URL patterns in metrics
+PATHS=(
+    "/"
+    "/"
+    "/"
+    "/product/OLJCESPC7Z"
+    "/product/66VCHSJNUP"
+    "/product/1YMWWN1N4O"
+    "/cart"
+)
 
 # Shared counters via temp files (subshell-safe)
 COUNTER_DIR=$(mktemp -d)
@@ -42,7 +56,7 @@ cleanup() {
     total=$((ok_total + err_total))
     echo ""
     echo "============================================"
-    echo "  OpenWebUI Traffic — Final Summary"
+    echo "  Ecomm Traffic — Final Summary"
     echo "============================================"
     echo "  Duration:    ${DURATION}s"
     echo "  Concurrency: ${CONCURRENCY}"
@@ -65,13 +79,17 @@ worker() {
     local ok=0
     local err=0
     local end_time=$(($(date +%s) + DURATION))
+    local path_count=${#PATHS[@]}
+    local idx=0
     while [ "$(date +%s)" -lt "$end_time" ]; do
+        local path="${PATHS[$((idx % path_count))]}"
+        idx=$((idx + 1))
         local status
         status=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Host: ${VIRTUAL_HOST}" \
             --connect-timeout 5 \
             --max-time 10 \
-            "http://${ELB_HOST}/" 2>/dev/null) || status="000"
+            "http://${ELB_HOST}${path}" 2>/dev/null) || status="000"
         if [ "$status" -ge 200 ] && [ "$status" -lt 400 ]; then
             ok=$((ok + 1))
         else
@@ -83,12 +101,13 @@ worker() {
 }
 
 echo "============================================"
-echo "  OpenWebUI Traffic Generator"
+echo "  Ecomm (Online Boutique) Traffic Generator"
 echo "============================================"
 echo "  ELB:         ${ELB_HOST}"
 echo "  Host Header: ${VIRTUAL_HOST}"
 echo "  Duration:    ${DURATION}s"
 echo "  Concurrency: ${CONCURRENCY} workers"
+echo "  Paths:       ${#PATHS[@]} URL patterns"
 echo "============================================"
 echo ""
 
