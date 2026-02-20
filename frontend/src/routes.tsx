@@ -11,6 +11,7 @@ const InferenceOverview = lazy(() => import("@/pages/InferenceOverview"));
 const InferencePoolList = lazy(() => import("@/pages/InferencePoolList"));
 const InferencePoolCreate = lazy(() => import("@/pages/InferencePoolCreate"));
 const InferencePoolDetail = lazy(() => import("@/pages/InferencePoolDetail"));
+const InferencePoolEdit = lazy(() => import("@/pages/InferencePoolEdit"));
 const RouteList = lazy(() => import("@/pages/RouteList"));
 const RouteCreate = lazy(() => import("@/pages/RouteCreate"));
 const RouteDetail = lazy(() => import("@/pages/RouteDetail"));
@@ -48,6 +49,7 @@ export const routes: RouteObject[] = [
       { path: "inference/pools", element: <InferencePoolList /> },
       { path: "inference/pools/create", element: <InferencePoolCreate /> },
       { path: "inference/pools/:ns/:name", element: <InferencePoolDetail /> },
+      { path: "inference/pools/:ns/:name/edit", element: <InferencePoolEdit /> },
       { path: "routes", element: <RouteList /> },
       { path: "routes/create/:type", element: <RouteCreate /> },
       { path: "routes/:ns/:name", element: <RouteDetail /> },

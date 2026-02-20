@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchInferencePool,
   fetchInferenceMetricsSummary,
@@ -11,6 +11,7 @@ import {
   fetchGPUUtilSeries,
   fetchKVCacheSeries,
   fetchCostEstimate,
+  deleteInferencePool,
 } from "@/api/inference";
 import { MetricCard } from "@/components/inference/MetricCard";
 import { GPUHeatmap } from "@/components/inference/GPUHeatmap";
@@ -23,9 +24,13 @@ import { useActiveCluster } from "@/hooks/useActiveCluster";
 type Tab = "overview" | "epp" | "metrics" | "cost";
 
 export default function InferencePoolDetail() {
-  const { name } = useParams<{ ns: string; name: string }>();
+  const { ns, name } = useParams<{ ns: string; name: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const activeCluster = useActiveCluster();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const poolName = name ?? "";
 
   const { data: pool, isLoading, error } = useQuery({
@@ -89,6 +94,17 @@ export default function InferencePoolDetail() {
     enabled: !!poolName && activeTab === "cost",
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteInferencePool(poolName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["inference-pools"] });
+      navigate("/inference/pools");
+    },
+    onError: (err: any) => {
+      setDeleteError(err?.response?.data?.error || String(err));
+    },
+  });
+
   if (isLoading) return <p className="text-muted-foreground">Loading pool...</p>;
   if (error) return <p className="text-red-400">Failed to load pool: {String(error)}</p>;
   if (!pool) return <p className="text-muted-foreground">Pool not found.</p>;
@@ -119,6 +135,18 @@ export default function InferencePoolDetail() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            to={`/inference/pools/${ns}/${name}/edit`}
+            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted/30"
+          >
+            Edit
+          </Link>
+          <button
+            onClick={() => { setShowDeleteConfirm(true); setDeleteError(null); }}
+            className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-500/20"
+          >
+            Delete
+          </button>
           <span className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">{pool.namespace}</span>
           <span
             className={`rounded-md border px-2 py-0.5 text-xs font-medium ${
@@ -196,6 +224,43 @@ export default function InferencePoolDetail() {
           </div>
         )}
       </div>
+
+      {/* Delete confirmation dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-lg border border-border bg-background p-6 shadow-xl">
+            <h3 className="text-lg font-semibold">Delete Inference Pool</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Are you sure you want to delete pool{" "}
+              <span className="font-mono font-medium text-foreground">{pool.name}</span> in namespace{" "}
+              <span className="font-mono font-medium text-foreground">{pool.namespace}</span>?
+              This action cannot be undone.
+            </p>
+
+            {deleteError && (
+              <div className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteError(null); }}
+                className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/30"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
